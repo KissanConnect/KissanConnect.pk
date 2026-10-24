@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper authentication functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        ((request.auth.token != null && request.auth.token.role == 'admin') ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'admin'));
+    }
+
+    function isFarmer() {
+      return isAuthenticated() && 
+        ((request.auth.token != null && request.auth.token.role == 'farmer') ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'farmer'));
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Wholesaler Ratings & Reviews Collection:
+    // 1. Anyone can read reviews
+    // 2. Only a logged-in farmer can create a review with their own farmerUid and cannot rate themselves
+    // 3. The farmer can only edit or delete their own review
+    // 4. The target wholesaler can only add or update their public reply (wholesalerReply)
+    // 5. Admins can delete or hide any review
+    match /reviews/{reviewId} {
+      allow read: if true;
+
+      // Only a logged-in farmer can create a review using their own farmerUid
+      allow create: if isAuthenticated()
+        && isFarmer()
+        && request.resource.data.farmerUid == request.auth.uid
+        && request.resource.data.wholesalerUid != request.auth.uid;
+
+      // Updates:
+      // a) Farmer can edit their own ratings and comment
+      // b) Wholesaler can ONLY update the wholesalerReply field
+      // c) Admin can update/moderate
+      allow update: if isAuthenticated() && (
+        // Farmer editing their own review
+        (resource.data.farmerUid == request.auth.uid && request.resource.data.farmerUid == request.auth.uid) ||
+        // Wholesaler replying to review for their own business
+        (resource.data.wholesalerUid == request.auth.uid && 
+         request.resource.data.farmerUid == resource.data.farmerUid &&
+         request.resource.data.ratings == resource.data.ratings) ||
+        // Admin
+        isAdmin()
+      );
+
+      // Deletes: only the author farmer or an admin
+      allow delete: if isAuthenticated() && (
+        resource.data.farmerUid == request.auth.uid || 
+        isAdmin()
+      );
+    }
+
+    // Reported Reviews for Moderation
+    match /reportedReviews/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    // Mandi Listings
+    match /listings/{listingId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Fertilizer Prices Master Data
+    match /fertilizerPrices/{priceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Tractors Master Data
+    match /tractors/{tractorId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Reported Listings
+    match /reportedListings/{reportId} {
+      allow read: if isAdmin();
+      allow create: if true;
+      allow update, delete: if isAdmin();
+    }
+  }
+}

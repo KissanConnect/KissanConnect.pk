@@ -1,0 +1,6 @@
+{
+  "name": "Kissan Connect (کسان کنیکٹ)",
+  "description": "Pakistan's agricultural portal connecting farmers and wholesalers with live market rates, weather, crop planning, fertilizer prices, and marketplace.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
