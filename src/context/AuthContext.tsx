@@ -14,12 +14,22 @@ import {
   User as FirebaseUser
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { cleanData } from '../services/dataService';
+
+export interface PendingGoogleUser {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL?: string;
+}
 
 export interface AuthResponse {
   success: boolean;
   error?: string;
   errorCode?: string;
   isProfileSaveFailure?: boolean;
+  needsProfile?: boolean;
+  pendingGoogleUser?: PendingGoogleUser;
 }
 
 export interface AuthContextType {
@@ -37,6 +47,17 @@ export interface AuthContextType {
     businessName?: string;
   }) => Promise<AuthResponse>;
   loginWithGoogle: (defaultRole?: UserRole) => Promise<AuthResponse>;
+  saveGoogleProfile: (data: {
+    uid: string;
+    email: string;
+    fullName: string;
+    phone: string;
+    role: UserRole;
+    province: string;
+    city: string;
+    photoURL?: string;
+    businessName?: string;
+  }) => Promise<AuthResponse>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<AuthResponse>;
   demoLogin: (role: UserRole) => void;
@@ -133,24 +154,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (localProfile) {
                 setCurrentUser(localProfile);
               } else {
-                // Fallback create basic profile non-blockingly
-                const newProf: UserProfile = {
-                  uid: fbUser.uid,
-                  fullName: fbUser.displayName || 'Pakistani Farmer',
-                  email: fbUser.email || '',
-                  phone: fbUser.phoneNumber || '',
-                  role: 'farmer',
-                  province: 'Punjab',
-                  city: 'Multan',
-                  createdAt: new Date().toISOString()
-                };
-                try {
-                  await setDoc(doc(activeDb, 'users', fbUser.uid), newProf, { merge: true });
-                } catch (saveErr) {
-                  console.warn('Fallback profile save skipped (offline):', saveErr);
-                }
-                setCurrentUser(newProf);
-                localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(newProf));
+                // New user without a profile: do NOT let them in without completing their profile!
+                setCurrentUser(null);
+                localStorage.removeItem(LOCAL_USER_KEY);
               }
             }
           } catch (e) {
@@ -399,7 +405,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true };
   };
 
-  const loginWithGoogle = async (defaultRole: UserRole = 'farmer'): Promise<AuthResponse> => {
+  const loginWithGoogle = async (): Promise<AuthResponse> => {
     if (isFirebaseConfigured() && auth && db) {
       try {
         const provider = new GoogleAuthProvider();
@@ -434,30 +440,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.warn('Google sign-in getDoc failed (offline/continuing):', docErr);
         }
 
+        if (!existingProfile) {
+          const saved = localStorage.getItem(LOCAL_USER_KEY);
+          if (saved) {
+            try {
+              const p = JSON.parse(saved);
+              if (p && p.uid === cred.user.uid) existingProfile = p;
+            } catch {}
+          }
+        }
+
         if (existingProfile) {
           setCurrentUser(existingProfile);
           localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(existingProfile));
+          return { success: true, needsProfile: false };
         } else {
-          const newProfile: UserProfile = {
-            uid: cred.user.uid,
-            fullName: cred.user.displayName || 'Google Farmer',
-            email: cred.user.email || '',
-            phone: cred.user.phoneNumber || '+923001234567',
-            role: defaultRole,
-            province: 'Punjab',
-            city: 'Faisalabad',
-            photoURL: cred.user.photoURL || undefined,
-            createdAt: new Date().toISOString()
+          // If someone signs in with Google and has no profile yet, do not let them into the site without one!
+          return {
+            success: true,
+            needsProfile: true,
+            pendingGoogleUser: {
+              uid: cred.user.uid,
+              email: cred.user.email || '',
+              displayName: cred.user.displayName || 'Google User',
+              photoURL: cred.user.photoURL || undefined
+            }
           };
-          try {
-            await setDoc(doc(db, 'users', cred.user.uid), newProfile, { merge: true });
-          } catch (e) {
-            console.warn('Could not save Google profile doc:', e);
-          }
-          setCurrentUser(newProfile);
-          localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(newProfile));
         }
-        return { success: true };
       } catch (err: any) {
         console.error('Firebase Google sign-in error:', err);
         return { 
@@ -469,18 +478,75 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Local simulation Google login
-    const googleProfile: UserProfile = {
-      uid: 'google-demo-' + Date.now(),
-      fullName: 'Muhammad Usman (Google User)',
-      email: 'usman.farmer@gmail.com',
-      phone: '+923005554321',
-      role: defaultRole,
-      province: 'Punjab',
-      city: 'Multan',
+    const usersStr = localStorage.getItem('kissan_registered_users');
+    const registered: any[] = usersStr ? JSON.parse(usersStr) : [];
+    const found = registered.find(u => u.isGoogleUser || u.email.toLowerCase().includes('google'));
+
+    if (found) {
+      setCurrentUser(found);
+      localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(found));
+      return { success: true, needsProfile: false };
+    }
+
+    // New Google user in simulated mode: needs profile completion
+    return {
+      success: true,
+      needsProfile: true,
+      pendingGoogleUser: {
+        uid: 'google-sim-' + Date.now(),
+        email: 'user.google@gmail.com',
+        displayName: 'Google Demo User',
+        photoURL: undefined
+      }
+    };
+  };
+
+  const saveGoogleProfile = async (data: {
+    uid: string;
+    email: string;
+    fullName: string;
+    phone: string;
+    role: UserRole;
+    province: string;
+    city: string;
+    photoURL?: string;
+    businessName?: string;
+  }): Promise<AuthResponse> => {
+    const profile: UserProfile = {
+      uid: data.uid,
+      fullName: data.fullName,
+      email: data.email,
+      phone: data.phone,
+      role: data.role,
+      province: data.province,
+      city: data.city,
+      photoURL: data.photoURL,
+      businessName: data.role === 'wholesaler' ? data.businessName : undefined,
       createdAt: new Date().toISOString()
     };
-    setCurrentUser(googleProfile);
-    localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(googleProfile));
+
+    const cleaned = cleanData(profile) as UserProfile;
+
+    if (isFirebaseConfigured() && db) {
+      try {
+        await setDoc(doc(db, 'users', data.uid), cleaned, { merge: true });
+      } catch (err: any) {
+        console.warn('Failed to save Google profile to Firestore:', err);
+      }
+    }
+
+    const usersStr = localStorage.getItem('kissan_registered_users');
+    const registered: any[] = usersStr ? JSON.parse(usersStr) : [];
+    const existingIdx = registered.findIndex(u => u.uid === data.uid || u.email.toLowerCase() === data.email.toLowerCase());
+    if (existingIdx >= 0) {
+      registered[existingIdx] = { ...registered[existingIdx], ...cleaned, isGoogleUser: true };
+    } else {
+      registered.push({ ...cleaned, isGoogleUser: true });
+    }
+    localStorage.setItem('kissan_registered_users', JSON.stringify(registered));
+
+    setCurrentUser(cleaned);
+    localStorage.setItem(LOCAL_USER_KEY, JSON.stringify(cleaned));
     return { success: true };
   };
 
@@ -574,6 +640,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         signUp,
         loginWithGoogle,
+        saveGoogleProfile,
         logout,
         resetPassword,
         demoLogin,

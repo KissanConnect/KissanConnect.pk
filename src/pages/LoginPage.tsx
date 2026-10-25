@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
-import { useAuth } from '../context/AuthContext';
-import { Sprout, Lock, Mail, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { useAuth, PendingGoogleUser } from '../context/AuthContext';
+import { UserRole } from '../types';
+import { Sprout, Lock, Mail, ArrowRight, AlertCircle, CheckCircle2, User, Phone, MapPin, Building2, X } from 'lucide-react';
 import { UnauthorizedDomainAlert } from '../components/UnauthorizedDomainAlert';
 
 export const LoginPage: React.FC = () => {
   const { lang, t } = useLanguage();
-  const { login, loginWithGoogle, resetPassword, currentUser, loading: authLoading } = useAuth();
+  const { login, loginWithGoogle, saveGoogleProfile, logout, resetPassword, currentUser, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirect = searchParams.get('redirect');
@@ -21,6 +22,17 @@ export const LoginPage: React.FC = () => {
   const [resetSuccess, setResetSuccess] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
+
+  // Google profile completion state for new users
+  const [showGoogleProfileModal, setShowGoogleProfileModal] = useState(false);
+  const [pendingGoogleUser, setPendingGoogleUser] = useState<PendingGoogleUser | null>(null);
+  const [googleRole, setGoogleRole] = useState<UserRole>('farmer');
+  const [googlePhone, setGooglePhone] = useState('+92');
+  const [googleProvince, setGoogleProvince] = useState('Punjab');
+  const [googleCity, setGoogleCity] = useState('');
+  const [googleBusinessName, setGoogleBusinessName] = useState('');
+  const [googleFormError, setGoogleFormError] = useState('');
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
   // If a logged-in user opens the Login page, redirect them to their own dashboard
   useEffect(() => {
@@ -65,11 +77,17 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
     setErrorMsg('');
     setIsUnauthorizedDomain(false);
-    const res = await loginWithGoogle('farmer');
+    const res = await loginWithGoogle();
     setLoading(false);
     if (res.success) {
-      if (redirect) navigate(redirect);
-      else navigate('/farmer-dashboard');
+      if (res.needsProfile && res.pendingGoogleUser) {
+        setPendingGoogleUser(res.pendingGoogleUser);
+        setShowGoogleProfileModal(true);
+      } else {
+        if (redirect) navigate(redirect);
+        else if (currentUser?.role === 'wholesaler') navigate('/wholesaler-dashboard');
+        else navigate('/farmer-dashboard');
+      }
     } else {
       if (res.errorCode === 'auth/unauthorized-domain' || (res.error && res.error.toLowerCase().includes('unauthorized-domain'))) {
         setIsUnauthorizedDomain(true);
@@ -77,6 +95,51 @@ export const LoginPage: React.FC = () => {
         setErrorMsg(res.error || 'Google login failed.');
       }
     }
+  };
+
+  const handleGoogleProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingGoogleUser) return;
+    if (!googlePhone.trim() || !googleCity.trim()) {
+      setGoogleFormError(lang === 'ur' ? 'براہ کرم تمام مطلوبہ خانے پر کریں۔' : 'Please fill all required fields.');
+      return;
+    }
+
+    setGoogleSubmitting(true);
+    setGoogleFormError('');
+
+    const res = await saveGoogleProfile({
+      uid: pendingGoogleUser.uid,
+      email: pendingGoogleUser.email,
+      fullName: pendingGoogleUser.displayName || 'Google User',
+      phone: googlePhone.trim(),
+      role: googleRole,
+      province: googleProvince,
+      city: googleCity.trim(),
+      photoURL: pendingGoogleUser.photoURL,
+      businessName: googleRole === 'wholesaler' ? googleBusinessName.trim() : undefined
+    });
+
+    setGoogleSubmitting(false);
+
+    if (res.success) {
+      setShowGoogleProfileModal(false);
+      if (redirect) {
+        navigate(redirect);
+      } else if (googleRole === 'wholesaler') {
+        navigate('/wholesaler-dashboard');
+      } else {
+        navigate('/farmer-dashboard');
+      }
+    } else {
+      setGoogleFormError(res.error || 'Failed to save profile. Please try again.');
+    }
+  };
+
+  const handleCancelGoogleProfile = async () => {
+    await logout();
+    setShowGoogleProfileModal(false);
+    setPendingGoogleUser(null);
   };
 
   const handleResetSubmit = async (e: React.FormEvent) => {
@@ -224,6 +287,171 @@ export const LoginPage: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Google Profile Completion Modal */}
+      {showGoogleProfileModal && pendingGoogleUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs">
+          <div className="bg-[#FFFBEF] rounded-3xl max-w-md w-full p-6 sm:p-7 shadow-2xl border-2 border-[#1B6B2A] space-y-4 animate-in zoom-in-95 duration-200 text-start">
+            <div className="flex items-start justify-between pb-2 border-b border-[#E3D3A8]">
+              <div>
+                <h3 className="font-black text-lg text-[#0B3A17]">
+                  {lang === 'ur' ? 'پروفائل مکمل کریں' : 'Complete Your Profile'}
+                </h3>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  {lang === 'ur'
+                    ? 'گوگل سائن ان مکمل کرنے کے لیے اپنا کردار اور شہر درج کریں۔'
+                    : 'Select your role and location to complete Google registration.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelGoogleProfile}
+                className="p-1 text-gray-400 hover:text-gray-700 rounded-full cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Google Account Tag */}
+            <div className="p-3 bg-white rounded-2xl border border-[#E3D3A8] flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-full bg-[#1B6B2A] text-white flex items-center justify-center font-bold text-sm shrink-0">
+                {pendingGoogleUser.displayName.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-gray-900 truncate">{pendingGoogleUser.displayName}</p>
+                <p className="text-[11px] text-gray-500 truncate">{pendingGoogleUser.email}</p>
+              </div>
+            </div>
+
+            {googleFormError && (
+              <div className="p-2.5 bg-red-50 text-red-700 border border-red-200 rounded-xl text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{googleFormError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleGoogleProfileSubmit} className="space-y-3.5 text-xs">
+              {/* Role Selection */}
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+                  {lang === 'ur' ? 'آپ کا کردار منتخب کریں *' : 'Select Your Role *'}
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setGoogleRole('farmer')}
+                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                      googleRole === 'farmer'
+                        ? 'bg-[#1B5E20] text-white border-[#1B5E20] shadow-sm font-black'
+                        : 'bg-white hover:bg-gray-100 text-gray-700 border-gray-300 font-bold'
+                    }`}
+                  >
+                    <span>{lang === 'ur' ? 'کسان / زمیندار' : 'Farmer (Grower)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGoogleRole('wholesaler')}
+                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                      googleRole === 'wholesaler'
+                        ? 'bg-[#1B5E20] text-white border-[#1B5E20] shadow-sm font-black'
+                        : 'bg-white hover:bg-gray-100 text-gray-700 border-gray-300 font-bold'
+                    }`}
+                  >
+                    <span>{lang === 'ur' ? 'تاجر / آڑھتی' : 'Wholesaler (Trader)'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Mobile Phone */}
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                  {lang === 'ur' ? 'موبائل نمبر *' : 'Mobile Number *'}
+                </label>
+                <div className="relative">
+                  <Phone className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
+                  <input
+                    type="text"
+                    required
+                    value={googlePhone}
+                    onChange={(e) => setGooglePhone(e.target.value)}
+                    placeholder="+923001234567"
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-gray-300 rounded-xl font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Province & City */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    {lang === 'ur' ? 'صوبہ *' : 'Province *'}
+                  </label>
+                  <select
+                    value={googleProvince}
+                    onChange={(e) => setGoogleProvince(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-white border border-gray-300 rounded-xl font-semibold"
+                  >
+                    <option value="Punjab">Punjab (پنجاب)</option>
+                    <option value="Sindh">Sindh (سندھ)</option>
+                    <option value="KPK">KPK (کے پی کے)</option>
+                    <option value="Balochistan">Balochistan (بلوچستان)</option>
+                    <option value="Islamabad">Islamabad</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    {lang === 'ur' ? 'شہر / ضلع *' : 'City / District *'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={googleCity}
+                    onChange={(e) => setGoogleCity(e.target.value)}
+                    placeholder="e.g. Sahiwal"
+                    className="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl font-semibold"
+                  />
+                </div>
+              </div>
+
+              {/* Business name if wholesaler */}
+              {googleRole === 'wholesaler' && (
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1">
+                    {lang === 'ur' ? 'کاروبار یا دکان کا نام' : 'Business / Shop Name (Optional)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={googleBusinessName}
+                    onChange={(e) => setGoogleBusinessName(e.target.value)}
+                    placeholder="e.g. Madina Grain Traders"
+                    className="w-full px-3 py-2 bg-white border border-gray-300 rounded-xl font-semibold"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleCancelGoogleProfile}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-bold cursor-pointer"
+                >
+                  {lang === 'ur' ? 'منسوخ کریں' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  disabled={googleSubmitting}
+                  className="px-5 py-2 bg-[#1B6B2A] hover:bg-[#0F3D1E] disabled:opacity-60 text-white font-black rounded-xl shadow-md cursor-pointer transition-all"
+                >
+                  {googleSubmitting 
+                    ? (lang === 'ur' ? 'محفوظ کیا جا رہا ہے...' : 'Saving...')
+                    : (lang === 'ur' ? 'مکمل کریں اور جاری رکھیں' : 'Complete & Continue')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Forgot Password Modal */}
       {showForgotModal && (
