@@ -11,12 +11,14 @@ export const MobileBottomNav: React.FC = () => {
   const getDashboardLink = () => {
     if (!currentUser) return '/login';
     if (currentUser.role === 'wholesaler') return '/wholesaler-dashboard';
-    if (currentUser.role === 'admin') return '/admin';
     return '/farmer-dashboard';
   };
 
   return (
-    <div className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0F3D1E] text-[#FFF8E1] border-t border-[#1B6B2A] shadow-2xl safe-area-bottom">
+    <div 
+      className="xl:hidden fixed bottom-0 left-0 right-0 z-40 bg-[#0F3D1E] text-[#FFF8E1] border-t border-[#1B6B2A] shadow-2xl"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+    >
       <div className="grid grid-cols-5 h-16 items-center px-1 relative">
         
         {/* Tab 1: Home */}

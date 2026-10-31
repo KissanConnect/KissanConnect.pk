@@ -120,7 +120,6 @@ export const Navbar: React.FC = () => {
   const getDashboardPath = () => {
     if (!currentUser) return '/login';
     if (currentUser.role === 'wholesaler') return '/wholesaler-dashboard';
-    if (currentUser.role === 'admin') return '/admin';
     return '/farmer-dashboard';
   };
 
@@ -213,26 +212,30 @@ export const Navbar: React.FC = () => {
 
   return (
     <header 
-      className="sticky top-0 z-50 bg-[#0F3D1E] text-[#FFF8E1] border-b border-[#1B6B2A]/50 h-[72px] w-full"
-      style={{ overflowX: 'clip' }}
+      className="sticky top-0 z-50 bg-[#0F3D1E] text-[#FFF8E1] border-b border-[#1B6B2A]/50 w-full"
+      style={{ 
+        overflowX: 'clip',
+        paddingTop: 'env(safe-area-inset-top, 0px)',
+        minHeight: '72px'
+      }}
     >
-      {/* Container: max-width 1280px, centered, equal padding (24px desktop, 16px mobile/tablet) */}
-      <div className="max-w-[1280px] w-full mx-auto px-4 min-[1025px]:px-6 h-full flex items-center justify-between gap-4 text-base font-medium relative">
+      {/* Container: max-width 1280px, centered, equal padding (24px desktop, 16px mobile/tablet, 12px small phone) */}
+      <div className="max-w-[1280px] w-full mx-auto px-3 sm:px-4 min-[1025px]:px-6 h-[72px] flex items-center justify-between gap-2 sm:gap-4 text-base font-medium relative">
         
         {/* ========================================================= */}
         {/* GROUP 1: LEFT - LOGO, "Kissan Connect" & "PK" BADGE        */}
         {/* ========================================================= */}
-        <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
+        <Link to="/" className="flex items-center gap-1.5 sm:gap-2.5 shrink min-w-0 group">
           <img 
             src="/assets/aistudio/Kisan_Connect_Agricultural_Emblem_4927b7a8.png" 
             alt="Kissan Connect Logo" 
-            className="w-10 h-10 rounded-full object-cover shadow-md group-hover:scale-105 transition-transform border border-[#F2A900]/80 bg-white" 
+            className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover shadow-md group-hover:scale-105 transition-transform border border-[#F2A900]/80 bg-white shrink-0" 
           />
-          <div className="flex items-center gap-1.5">
-            <span className="font-extrabold text-lg sm:text-xl tracking-tight text-white whitespace-nowrap">
+          <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+            <span className="font-extrabold text-base sm:text-lg min-[1025px]:text-xl tracking-tight text-white truncate whitespace-nowrap">
               {lang === 'ur' ? 'کسان کنیکٹ' : 'Kissan Connect'}
             </span>
-            <span className="text-[10px] bg-[#F2A900] text-[#1A1A1A] px-1.5 py-0.5 rounded-sm font-black uppercase tracking-wider">
+            <span className="text-[9px] sm:text-[10px] bg-[#F2A900] text-[#1A1A1A] px-1 sm:px-1.5 py-0.5 rounded-sm font-black uppercase tracking-wider shrink-0">
               PK
             </span>
           </div>
@@ -268,13 +271,13 @@ export const Navbar: React.FC = () => {
         {/* GROUP 3: RIGHT - SEARCH, LANG TOGGLE, ONE MENU BUTTON    */}
         {/* flex-shrink: 0, equal 12px gaps, on ALL screen sizes      */}
         {/* ========================================================= */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           
-          {/* 1. Search Icon Button (44px) */}
+          {/* 1. Search Icon Button (44px tap target) */}
           <button
             type="button"
             onClick={() => setSearchOpen(!searchOpen)}
-            className={`min-w-[44px] min-h-[44px] w-11 h-11 flex items-center justify-center rounded-xl transition-all cursor-pointer border shadow-xs shrink-0 ${
+            className={`min-w-[44px] min-h-[44px] w-10 h-10 sm:w-11 sm:h-11 flex items-center justify-center rounded-xl transition-all cursor-pointer border shadow-xs shrink-0 ${
               searchOpen
                 ? 'bg-[#F2A900] text-[#1A1A1A] border-[#F2A900]'
                 : 'bg-[#1B6B2A] hover:bg-[#2E7D32] text-[#F2A900] border-[#E3D3A8]/30'
@@ -290,7 +293,7 @@ export const Navbar: React.FC = () => {
             <button
               type="button"
               onClick={() => setLanguage('ur')}
-              className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 lang === 'ur'
                   ? 'bg-[#F2A900] text-[#1A1A1A] shadow-xs'
                   : 'text-[#FFF8E1]/80 hover:text-white'
@@ -302,7 +305,7 @@ export const Navbar: React.FC = () => {
             <button
               type="button"
               onClick={() => setLanguage('en')}
-              className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
                 lang === 'en'
                   ? 'bg-[#F2A900] text-[#1A1A1A] shadow-xs'
                   : 'text-[#FFF8E1]/80 hover:text-white'
@@ -318,7 +321,7 @@ export const Navbar: React.FC = () => {
             ref={menuBtnRef}
             type="button"
             onClick={() => setMenuOpen(!menuOpen)}
-            className={`min-w-[44px] min-h-[44px] w-11 h-11 flex items-center justify-center rounded-xl transition-all cursor-pointer border shadow-xs shrink-0 ${
+            className={`min-w-[44px] min-h-[44px] w-10 h-10 sm:w-11 sm:h-11 flex items-center justify-center rounded-xl transition-all cursor-pointer border shadow-xs shrink-0 ${
               menuOpen
                 ? 'bg-[#F2A900] text-[#1A1A1A] border-[#F2A900]'
                 : 'bg-[#1B6B2A] hover:bg-[#2E7D32] text-white border-[#E3D3A8]/30'

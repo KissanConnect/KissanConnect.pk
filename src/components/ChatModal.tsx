@@ -50,6 +50,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentUser?.suspended) return;
     if (!inputText.trim() || sending) return;
 
     setSending(true);
@@ -181,31 +182,39 @@ export const ChatModal: React.FC<ChatModalProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Footer */}
-        <form
-          onSubmit={handleSend}
-          className="p-3 bg-white border-t border-gray-100 flex items-center gap-2"
-        >
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder={
-              lang === 'ur'
-                ? 'اپنا پیغام یہاں لکھیں (مثلاً کیا ریٹ میں کمی ممکن ہے؟)...'
-                : 'Type your message (e.g. Is this still available?)...'
-            }
-            className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-[#2E7D32] focus:border-transparent"
-          />
-          <button
-            type="submit"
-            disabled={!inputText.trim() || sending}
-            className="px-4 py-2.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white font-bold rounded-xl text-sm transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+        {/* Input Footer or Suspension Alert */}
+        {currentUser?.suspended ? (
+          <div className="p-3 bg-red-50 border-t border-red-200 text-center text-red-800 text-xs font-bold py-3.5">
+            {lang === 'ur' 
+              ? 'آپ کا اکاؤنٹ معطل ہے۔ آپ پیغامات ارسال نہیں کر سکتے۔'
+              : 'Your account is suspended. Messaging is disabled.'}
+          </div>
+        ) : (
+          <form
+            onSubmit={handleSend}
+            className="p-3 bg-white border-t border-gray-100 flex items-center gap-2"
           >
-            <Send className="w-4 h-4" />
-            <span className="hidden sm:inline">{lang === 'ur' ? 'ارسال' : 'Send'}</span>
-          </button>
-        </form>
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder={
+                lang === 'ur'
+                  ? 'اپنا پیغام یہاں لکھیں (مثلاً کیا ریٹ میں کمی ممکن ہے؟)...'
+                  : 'Type your message (e.g. Is this still available?)...'
+              }
+              className="flex-1 px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:outline-hidden focus:ring-2 focus:ring-[#2E7D32] focus:border-transparent"
+            />
+            <button
+              type="submit"
+              disabled={!inputText.trim() || sending}
+              className="px-4 py-2.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white font-bold rounded-xl text-sm transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <Send className="w-4 h-4" />
+              <span className="hidden sm:inline">{lang === 'ur' ? 'ارسال' : 'Send'}</span>
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

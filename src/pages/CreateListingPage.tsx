@@ -162,6 +162,43 @@ export const CreateListingPage: React.FC = () => {
     );
   }
 
+  // If account is suspended by admin
+  if (currentUser.suspended) {
+    return (
+      <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-6">
+        <div className="w-16 h-16 rounded-3xl bg-red-100 text-red-600 flex items-center justify-center mx-auto shadow-md">
+          <Lock className="w-8 h-8" />
+        </div>
+        <div>
+          <h2 className="text-2xl font-black text-red-900">
+            {lang === 'ur' ? 'اکاؤنٹ معطل ہے' : 'Account Suspended'}
+          </h2>
+          <p className="text-sm text-red-700 mt-2 bg-red-50 p-4 rounded-2xl border border-red-200">
+            {currentUser.suspendedReason
+              ? `${lang === 'ur' ? 'معطلی کی وجہ: ' : 'Suspension Reason: '}${currentUser.suspendedReason}`
+              : (lang === 'ur'
+                ? 'آپ کا اکاؤنٹ انتظامیہ کی جانب سے معطل کیا گیا ہے۔ آپ نئے اشتہارات پوسٹ نہیں کر سکتے۔'
+                : 'Your account has been suspended by administration. You cannot post new listings.')}
+          </p>
+        </div>
+        <div className="flex justify-center gap-3">
+          <Link
+            to="/market"
+            className="px-6 py-3 bg-[#1B6B2A] text-white font-bold rounded-xl text-sm shadow-md"
+          >
+            {lang === 'ur' ? 'منڈی پر واپس جائیں' : 'Return to Market'}
+          </Link>
+          <Link
+            to="/contact"
+            className="px-6 py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-xl text-sm shadow-sm"
+          >
+            {lang === 'ur' ? 'ہیلپ لائن پر رابطہ کریں' : 'Contact Support'}
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       

@@ -1,27 +1,43 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
 import { useLanguage } from '../context/LanguageContext';
 import { useAuth } from '../context/AuthContext';
+import { NotFoundPage } from './NotFoundPage';
+import { 
+  FertilizerPrice, 
+  Tractor, 
+  Listing, 
+  WholesalerReview, 
+  ReportedListing, 
+  ReportedReview, 
+  UserProfile,
+  AdminLog 
+} from '../types';
 import { 
   getFertilizerPrices, 
   updateFertilizerPrice, 
   getTractors, 
   updateTractor, 
   getReportedListings,
-  updateReportStatus,
-  uploadTractorPhoto,
-  uploadCropPhoto
+  uploadTractorPhoto 
 } from '../services/dataService';
 import { 
-  getReportedReviews, 
-  updateReportedReviewStatus, 
-  deleteReviewByAdmin 
+  getReportedReviews 
 } from '../services/reviewService';
-import { FertilizerPrice, Tractor, ReportedListing, ReportedReview } from '../types';
-import { CROPS_DATA } from '../data/cropsData';
-import { formatPKR } from '../utils/formatters';
-import { TractorImage } from '../components/TractorImage';
-import { CropImage } from '../components/CropImage';
+import {
+  getAllListingsAdmin,
+  hideListingAdmin,
+  removeListingByAdmin,
+  deleteListingAdmin,
+  getAllUsersAdmin,
+  suspendUserAdmin,
+  unsuspendUserAdmin,
+  getAllReviewsAdmin,
+  hideReviewAdmin,
+  deleteReviewAdmin,
+  clearReportAdmin,
+  getAdminLogs
+} from '../services/adminService';
+import { formatPKR, formatDate, timeAgo } from '../utils/formatters';
 import { 
   ShieldCheck, 
   Lock, 
@@ -35,732 +51,1278 @@ import {
   X, 
   AlertTriangle,
   Upload,
-  Image as ImageIcon,
-  CheckCircle2,
   RefreshCw,
-  BookOpen,
   MessageSquare,
   Trash2,
-  Star
+  Star,
+  Users,
+  ShoppingBag,
+  Eye,
+  EyeOff,
+  UserX,
+  UserCheck,
+  Search,
+  Filter,
+  FileText,
+  Clock,
+  History,
+  AlertCircle
 } from 'lucide-react';
 
 export const AdminPage: React.FC = () => {
   const { lang, t } = useLanguage();
   const { currentUser } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'fertilizer' | 'tractors' | 'crops' | 'reports' | 'reportedReviews'>('fertilizer');
-  
-  // Data
-  const [fertilizers, setFertilizers] = useState<FertilizerPrice[]>([]);
-  const [tractors, setTractors] = useState<Tractor[]>([]);
-  const [reports, setReports] = useState<ReportedListing[]>([]);
-  const [reportedReviews, setReportedReviews] = useState<ReportedReview[]>([]);
+  // If a non-admin opens /control-room-kc, show the normal 404 page with NO hint that an admin area exists
+  if (!currentUser || currentUser.role !== 'admin') {
+    return <NotFoundPage />;
+  }
+
+  // Active Tab: 6 required tabs + logs tab
+  const [activeTab, setActiveTab] = useState<
+    'reports' | 'listings' | 'users' | 'reviews' | 'transport' | 'prices' | 'logs'
+  >('reports');
+
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Upload States
-  const [uploadingId, setUploadingId] = useState<string | null>(null);
-  const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
+  // Data states
+  const [reportedListings, setReportedListings] = useState<ReportedListing[]>([]);
+  const [reportedReviews, setReportedReviews] = useState<ReportedReview[]>([]);
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [reviews, setReviews] = useState<WholesalerReview[]>([]);
+  const [fertilizers, setFertilizers] = useState<FertilizerPrice[]>([]);
+  const [tractors, setTractors] = useState<Tractor[]>([]);
+  const [logs, setLogs] = useState<AdminLog[]>([]);
 
-  // Editing state for fertilizer
-  const [editingFertId, setEditingFertId] = useState<string | null>(null);
-  const [editPrice, setEditPrice] = useState<number>(0);
+  // Search & Filters
+  const [listingSearch, setListingSearch] = useState('');
+  const [listingCategoryFilter, setListingCategoryFilter] = useState('All');
+  const [userSearch, setUserSearch] = useState('');
+  const [reviewSearch, setReviewSearch] = useState('');
+  const [reportFilter, setReportFilter] = useState<'all' | 'pending' | 'reviewed' | 'dismissed'>('pending');
 
-  // New fertilizer price form
-  const [showAddFert, setShowAddFert] = useState<boolean>(false);
-  const [newFert, setNewFert] = useState<Partial<FertilizerPrice>>({
-    name: '',
-    nameUrdu: '',
-    brand: 'FFC',
-    brandUrdu: 'فوجی فرٹیلائزر',
-    type: 'Urea',
-    bagWeightKg: 50,
-    currentPrice: 4650,
-    previousPrice: 4650,
-    lastUpdated: new Date().toISOString().slice(0, 10),
-    notes: ''
-  });
+  // Reason Modals
+  const [removalModalItem, setRemovalModalItem] = useState<{ id: string; title: string; type: 'listing' | 'transport' } | null>(null);
+  const [removalReason, setRemovalReason] = useState('Violated market policy / Spam / Fraudulent rate');
+  const [suspendModalUser, setSuspendModalUser] = useState<UserProfile | null>(null);
+  const [suspendReason, setSuspendReason] = useState('Abusive behavior / Unfulfilled mandi contracts');
 
-  const tractorFileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedTractorForUpload, setSelectedTractorForUpload] = useState<string | null>(null);
+  // Fertilizer & Tractor Edit States
+  const [editingFert, setEditingFert] = useState<FertilizerPrice | null>(null);
+  const [editingTractor, setEditingTractor] = useState<Tractor | null>(null);
+  const [uploadingTractorId, setUploadingTractorId] = useState<string | null>(null);
+  const tractorFileRef = useRef<HTMLInputElement>(null);
 
-  const cropFileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedCropForUpload, setSelectedCropForUpload] = useState<string | null>(null);
-
-  const loadData = async () => {
+  const loadAllAdminData = async () => {
     setLoading(true);
-    const [f, tr, rep, revRep] = await Promise.all([
-      getFertilizerPrices(),
-      getTractors(),
-      getReportedListings(),
-      getReportedReviews()
-    ]);
-    setFertilizers(f);
-    setTractors(tr);
-    setReports(rep);
-    setReportedReviews(revRep);
-    setLoading(false);
+    try {
+      const [repL, repR, allL, allU, allRev, ferts, tracs, adminLogs] = await Promise.all([
+        getReportedListings(),
+        getReportedReviews(),
+        getAllListingsAdmin(),
+        getAllUsersAdmin(),
+        getAllReviewsAdmin(),
+        getFertilizerPrices(),
+        getTractors(),
+        getAdminLogs()
+      ]);
+      setReportedListings(repL);
+      setReportedReviews(repR);
+      setListings(allL);
+      setUsers(allU);
+      setReviews(allRev);
+      setFertilizers(ferts);
+      setTractors(tracs);
+      setLogs(adminLogs);
+    } catch (err) {
+      console.error('Error loading admin moderation data:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    loadData();
+    loadAllAdminData();
   }, []);
 
-  // Client-side image compression to 800px width
-  const compressImageTo800px = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 800;
-          let width = img.width;
-          let height = img.height;
-          if (width > MAX_WIDTH) {
-            height = Math.round((height * MAX_WIDTH) / width);
-            width = MAX_WIDTH;
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            reject(new Error('Canvas context unavailable'));
-            return;
-          }
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.85));
-        };
-        img.onerror = reject;
-        img.src = e.target?.result as string;
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+  // Actions
+  const handleToggleHideListing = async (listingId: string, currentHidden: boolean) => {
+    await hideListingAdmin(listingId, !currentHidden, currentUser);
+    loadAllAdminData();
   };
 
-  const handleTractorFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedTractorForUpload) return;
-    setUploadingId(selectedTractorForUpload);
-    try {
-      const compressedBase64 = await compressImageTo800px(file);
-      await uploadTractorPhoto(selectedTractorForUpload, compressedBase64);
-      setUploadSuccess(`Tractor photo uploaded and saved successfully!`);
-      setTimeout(() => setUploadSuccess(null), 4000);
-      loadData();
-    } catch (err) {
-      console.error('Failed to compress/upload tractor photo:', err);
-      alert('Failed to process image. Please try another image file.');
-    } finally {
-      setUploadingId(null);
-      setSelectedTractorForUpload(null);
-      if (tractorFileInputRef.current) tractorFileInputRef.current.value = '';
+  const handleConfirmRemoval = async () => {
+    if (!removalModalItem) return;
+    await removeListingByAdmin(removalModalItem.id, removalReason, currentUser);
+    setRemovalModalItem(null);
+    loadAllAdminData();
+  };
+
+  const handleDeleteListing = async (listingId: string) => {
+    if (confirm(lang === 'ur' ? 'کیا آپ اس اشتہار کو مستقل طور پر حذف کرنا چاہتے ہیں؟' : 'Permanently delete this listing?')) {
+      await deleteListingAdmin(listingId, currentUser);
+      loadAllAdminData();
     }
   };
 
-  const handleCropFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedCropForUpload) return;
-    setUploadingId(selectedCropForUpload);
-    try {
-      const compressedBase64 = await compressImageTo800px(file);
-      await uploadCropPhoto(selectedCropForUpload, compressedBase64);
-      setUploadSuccess(`Crop photo uploaded and saved successfully!`);
-      setTimeout(() => setUploadSuccess(null), 4000);
-      loadData();
-    } catch (err) {
-      console.error('Failed to compress/upload crop photo:', err);
-      alert('Failed to process image. Please try another image file.');
-    } finally {
-      setUploadingId(null);
-      setSelectedCropForUpload(null);
-      if (cropFileInputRef.current) cropFileInputRef.current.value = '';
+  const handleConfirmSuspend = async () => {
+    if (!suspendModalUser) return;
+    await suspendUserAdmin(suspendModalUser.uid, suspendReason, currentUser);
+    setSuspendModalUser(null);
+    loadAllAdminData();
+  };
+
+  const handleUnsuspendUser = async (userId: string) => {
+    await unsuspendUserAdmin(userId, currentUser);
+    loadAllAdminData();
+  };
+
+  const handleToggleHideReview = async (reviewId: string, currentHidden: boolean) => {
+    await hideReviewAdmin(reviewId, !currentHidden, currentUser);
+    loadAllAdminData();
+  };
+
+  const handleDeleteReview = async (reviewId: string) => {
+    if (confirm(lang === 'ur' ? 'کیا آپ اس تبصرے کو مستقل طور پر حذف کرنا چاہتے ہیں؟' : 'Permanently delete this review?')) {
+      await deleteReviewAdmin(reviewId, currentUser);
+      loadAllAdminData();
     }
   };
 
-  const handleSaveFertPrice = async (item: FertilizerPrice) => {
-    const updated: FertilizerPrice = {
-      ...item,
-      previousPrice: item.currentPrice,
-      currentPrice: editPrice,
-      lastUpdated: new Date().toISOString().slice(0, 10)
-    };
-    await updateFertilizerPrice(updated);
-    setEditingFertId(null);
-    loadData();
+  const handleClearReport = async (reportId: string, type: 'listing' | 'review', status: 'reviewed' | 'dismissed') => {
+    await clearReportAdmin(reportId, type, status, currentUser);
+    loadAllAdminData();
   };
 
-  const handleAddNewFert = async (e: React.FormEvent) => {
+  const handleSaveFertilizerPrice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFert.name || !newFert.currentPrice) return;
-    const item: FertilizerPrice = {
-      id: 'fert_' + Date.now(),
-      name: newFert.name,
-      nameUrdu: newFert.nameUrdu || newFert.name,
-      brand: newFert.brand || 'FFC',
-      brandUrdu: newFert.brandUrdu || 'ایف ایف سی',
-      type: (newFert.type as any) || 'Urea',
-      bagWeightKg: 50,
-      currentPrice: Number(newFert.currentPrice),
-      previousPrice: Number(newFert.currentPrice),
-      lastUpdated: new Date().toISOString().slice(0, 10),
-      notes: newFert.notes
-    };
-    await updateFertilizerPrice(item);
-    setShowAddFert(false);
-    loadData();
+    if (!editingFert) return;
+    await updateFertilizerPrice(editingFert);
+    setEditingFert(null);
+    loadAllAdminData();
   };
 
-  const handleReportAction = async (reportId: string, status: 'reviewed' | 'dismissed') => {
-    await updateReportStatus(reportId, status);
-    loadData();
+  const handleSaveTractor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTractor) return;
+    await updateTractor(editingTractor);
+    setEditingTractor(null);
+    loadAllAdminData();
   };
 
-  const handleReviewReportAction = async (reportId: string, status: 'reviewed' | 'dismissed') => {
-    await updateReportedReviewStatus(reportId, status);
-    loadData();
-  };
-
-  const handleDeleteReportedReview = async (reviewId: string, reportId: string) => {
-    if (confirm(lang === 'ur' ? 'کیا آپ اس تبصرے کو مستقل طور پر حذف کرنا چاہتے ہیں؟' : 'Are you sure you want to delete this reported review?')) {
-      await deleteReviewByAdmin(reviewId);
-      await updateReportedReviewStatus(reportId, 'reviewed');
-      loadData();
+  // Filtered Lists
+  const filteredListings = listings.filter((l) => {
+    if (listingCategoryFilter !== 'All' && l.category !== listingCategoryFilter) return false;
+    if (listingSearch) {
+      const q = listingSearch.toLowerCase();
+      return (
+        l.title.toLowerCase().includes(q) ||
+        l.sellerName.toLowerCase().includes(q) ||
+        l.sellerCity.toLowerCase().includes(q) ||
+        l.sellerPhone.includes(q)
+      );
     }
-  };
+    return true;
+  });
 
-  // Strictly restrict access to users whose Firestore profile has role 'admin'
-  if (currentUser?.role !== 'admin') {
+  const transportOffers = listings.filter(
+    (l) => l.category === 'Farm Machinery' || l.title.toLowerCase().includes('transport') || l.title.toLowerCase().includes('ٹرانسپورٹ')
+  );
+
+  const filteredUsers = users.filter((u) => {
+    if (!userSearch) return true;
+    const q = userSearch.toLowerCase();
     return (
-      <div className="max-w-md mx-auto px-4 py-20 text-center space-y-6 text-start">
-        <div className="w-16 h-16 rounded-3xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto shadow-md">
-          <Lock className="w-8 h-8" />
-        </div>
-        <div className="text-center">
-          <h2 className="text-2xl font-black text-gray-900">
-            {lang === 'ur' ? 'ایڈمن کنٹرول پینل تک رسائی محدود ہے' : 'Restricted Admin Access'}
-          </h2>
-          <p className="text-xs sm:text-sm text-gray-600 mt-2">
-            {lang === 'ur'
-              ? 'یہ صفحہ صرف ان صارفین کے لیے مخصوص ہے جن کا فائر اسٹور پروفائل رول "admin" ہو۔'
-              : 'This management console is strictly restricted to accounts with role "admin".'}
-          </p>
-        </div>
-        <div className="flex justify-center pt-2">
-          <Link
-            to="/login"
-            className="px-6 py-2.5 bg-[#1B5E20] hover:bg-[#2E7D32] text-white font-bold rounded-xl text-xs shadow-md transition-all"
-          >
-            {lang === 'ur' ? 'لاگ ان صفحہ پر جائیں' : 'Sign In With Admin Account'}
-          </Link>
-        </div>
-      </div>
+      u.fullName.toLowerCase().includes(q) ||
+      u.email.toLowerCase().includes(q) ||
+      u.phone.includes(q) ||
+      u.city.toLowerCase().includes(q) ||
+      u.role.toLowerCase().includes(q)
     );
-  }
+  });
+
+  const filteredReviews = reviews.filter((r) => {
+    if (!reviewSearch) return true;
+    const q = reviewSearch.toLowerCase();
+    return (
+      (r.wholesalerName && r.wholesalerName.toLowerCase().includes(q)) ||
+      r.farmerName.toLowerCase().includes(q) ||
+      r.comment.toLowerCase().includes(q)
+    );
+  });
+
+  const filteredReportedListings = reportedListings.filter((r) => {
+    if (reportFilter === 'all') return true;
+    return r.status === reportFilter;
+  });
+
+  const filteredReportedReviews = reportedReviews.filter((r) => {
+    if (reportFilter === 'all') return true;
+    return r.status === reportFilter;
+  });
+
+  const isUrdu = lang === 'ur';
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 text-start">
+    <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 text-start" dir={isUrdu ? 'rtl' : 'ltr'}>
       
-      {/* Hidden File Inputs */}
-      <input
-        type="file"
-        ref={tractorFileInputRef}
-        accept="image/*"
-        onChange={handleTractorFileChange}
-        className="hidden"
-      />
-      <input
-        type="file"
-        ref={cropFileInputRef}
-        accept="image/*"
-        onChange={handleCropFileChange}
-        className="hidden"
-      />
-
-      {/* Upload Success Banner */}
-      {uploadSuccess && (
-        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 flex items-center justify-between shadow-md">
+      {/* Admin Top Header Banner */}
+      <div className="bg-[#0F3D1E] text-[#FFF8E1] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#1B6B2A] flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="space-y-1.5">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-[#2E7D32]" />
-            <span className="text-xs sm:text-sm font-bold">{uploadSuccess}</span>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-[#F2A900] text-[#1A1A1A] uppercase tracking-wider">
+              {isUrdu ? 'انتظامی کنٹرول روم' : 'Command Center'}
+            </span>
+            <span className="text-xs text-[#81C784]">
+              {currentUser.email}
+            </span>
           </div>
-          <button onClick={() => setUploadSuccess(null)} className="p-1">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-gray-200">
-        <div>
-          <span className="text-xs font-bold text-amber-900 bg-amber-100 px-3 py-1 rounded-full uppercase tracking-wider inline-block">
-            Master Data Administration
-          </span>
-          <h1 className="text-2xl sm:text-4xl font-black text-[#1B5E20] mt-1">
-            {t.navAdmin}
+          <h1 className="text-2xl sm:text-3xl font-black text-white">
+            {isUrdu ? 'کسان کنیکٹ: مرکزی ایڈمن و ماڈریشن پینل' : 'Kissan Connect Moderation Control'}
           </h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            Logged in as: {currentUser.fullName} ({currentUser.email}) • Role: <span className="font-bold uppercase text-emerald-800">Admin</span>
+          <p className="text-xs sm:text-sm text-[#FFF8E1]/80 max-w-2xl">
+            {isUrdu
+              ? 'صارفین کی معطلی، غلط اشتہارات کا اخراج، رپورٹس کی جانچ پڑتال اور مارکیٹ قیمتوں کے کنٹرول کا خفیہ مرکز۔'
+              : 'Discreet system moderation: suspend malicious actors, moderate listings & reviews, clear reports, and update master rates.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {activeTab === 'fertilizer' && (
+        <button
+          type="button"
+          onClick={loadAllAdminData}
+          disabled={loading}
+          className="self-start md:self-auto px-4 py-2.5 bg-[#1B6B2A] hover:bg-[#2E7D32] text-white font-bold rounded-xl text-xs sm:text-sm shadow-md flex items-center gap-2 cursor-pointer transition-all shrink-0"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <span>{isUrdu ? 'تازہ ترین معلومات لائیں' : 'Refresh Data'}</span>
+        </button>
+      </div>
+
+      {/* Tabs Navigation (Exact 6 required tabs + audit logs) */}
+      <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-2 border-b border-[#E3D3A8] scrollbar-thin">
+        {[
+          { key: 'reports', labelEn: `Reported Items (${reportedListings.filter(r => r.status === 'pending').length + reportedReviews.filter(r => r.status === 'pending').length})`, labelUr: `رپورٹ شدہ آئٹمز (${reportedListings.filter(r => r.status === 'pending').length + reportedReviews.filter(r => r.status === 'pending').length})`, icon: Flag },
+          { key: 'listings', labelEn: `All Listings (${listings.length})`, labelUr: `تمام اشتہارات (${listings.length})`, icon: ShoppingBag },
+          { key: 'users', labelEn: `Users (${users.length})`, labelUr: `صارفین (${users.length})`, icon: Users },
+          { key: 'reviews', labelEn: `Reviews (${reviews.length})`, labelUr: `تبصرے (${reviews.length})`, icon: MessageSquare },
+          { key: 'transport', labelEn: `Transport Offers (${transportOffers.length})`, labelUr: `ٹرانسپورٹ آفرز (${transportOffers.length})`, icon: Truck },
+          { key: 'prices', labelEn: 'Fertilizer & Tractor Rates', labelUr: 'کھاد و ٹریکٹر ریٹس', icon: TrendingUp },
+          { key: 'logs', labelEn: `Admin Logs (${logs.length})`, labelUr: `ایڈمن لاگز (${logs.length})`, icon: History }
+        ].map((tab) => {
+          const isActive = activeTab === tab.key;
+          const Icon = tab.icon;
+          return (
             <button
-              onClick={() => setShowAddFert(true)}
-              className="px-4 py-2 bg-[#2E7D32] hover:bg-[#1B5E20] text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md cursor-pointer"
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key as any)}
+              className={`px-3.5 py-2.5 rounded-2xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all flex items-center gap-2 cursor-pointer ${
+                isActive
+                  ? 'bg-[#1B6B2A] text-[#F2A900] shadow-md scale-[1.02]'
+                  : 'bg-[#FFFBEF] hover:bg-[#FFF3D6] text-gray-800 border border-[#E3D3A8]'
+              }`}
             >
-              <Plus className="w-4 h-4" />
-              <span>{t.addFertilizerPrice}</span>
+              <Icon className="w-4 h-4 shrink-0" />
+              <span>{isUrdu ? tab.labelUr : tab.labelEn}</span>
             </button>
-          )}
-        </div>
+          );
+        })}
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap gap-2 border-b border-gray-200 pb-3">
-        <button
-          onClick={() => setActiveTab('fertilizer')}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-            activeTab === 'fertilizer' ? 'bg-[#1B5E20] text-white shadow-xs' : 'bg-white text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          Fertilizer Rates ({fertilizers.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('tractors')}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-            activeTab === 'tractors' ? 'bg-[#1B5E20] text-white shadow-xs' : 'bg-white text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          Tractors & Photos ({tractors.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('crops')}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-            activeTab === 'crops' ? 'bg-[#1B5E20] text-white shadow-xs' : 'bg-white text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          Crop Manuals & Photos ({CROPS_DATA.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('reports')}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-            activeTab === 'reports' ? 'bg-[#1B5E20] text-white shadow-xs' : 'bg-white text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          Reported Listings ({reports.length})
-        </button>
-        <button
-          onClick={() => setActiveTab('reportedReviews')}
-          className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer ${
-            activeTab === 'reportedReviews' ? 'bg-[#1B5E20] text-white shadow-xs' : 'bg-white text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          Wholesaler Reviews ({reportedReviews.filter((r) => r.status === 'pending').length})
-        </button>
-      </div>
-
-      {/* Fertilizer Price Management Tab */}
-      {activeTab === 'fertilizer' && (
-        <div className="bg-white rounded-3xl shadow-xl border border-gray-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs sm:text-sm">
-              <thead className="bg-[#1B5E20] text-white">
-                <tr>
-                  <th className="p-4 font-bold">Fertilizer & Brand</th>
-                  <th className="p-4 font-bold">Type</th>
-                  <th className="p-4 font-bold">Current Rate</th>
-                  <th className="p-4 font-bold">Previous Rate</th>
-                  <th className="p-4 font-bold">Last Updated</th>
-                  <th className="p-4 font-bold text-right">Quick Edit</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {fertilizers.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="p-4 font-bold text-gray-900">
-                      {item.name}
-                      <span className="block text-xs font-normal text-gray-500">{item.brand}</span>
-                    </td>
-                    <td className="p-4">
-                      <span className="px-2.5 py-1 bg-emerald-50 text-emerald-800 rounded-md font-bold text-xs">
-                        {item.type}
-                      </span>
-                    </td>
-                    <td className="p-4 font-black text-[#1B5E20] text-base">
-                      {editingFertId === item.id ? (
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="number"
-                            value={editPrice}
-                            onChange={(e) => setEditPrice(Number(e.target.value))}
-                            className="w-28 p-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm font-bold"
-                          />
-                          <button
-                            onClick={() => handleSaveFertPrice(item)}
-                            className="p-1.5 bg-[#2E7D32] text-white rounded-lg cursor-pointer"
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => setEditingFertId(null)}
-                            className="p-1.5 bg-gray-200 text-gray-600 rounded-lg cursor-pointer"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        formatPKR(item.currentPrice)
-                      )}
-                    </td>
-                    <td className="p-4 text-gray-500">{formatPKR(item.previousPrice)}</td>
-                    <td className="p-4 text-xs text-gray-400">{item.lastUpdated}</td>
-                    <td className="p-4 text-right">
-                      {editingFertId !== item.id && (
-                        <button
-                          onClick={() => {
-                            setEditingFertId(item.id);
-                            setEditPrice(item.currentPrice);
-                          }}
-                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 font-bold rounded-lg text-xs cursor-pointer inline-flex items-center gap-1"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                          <span>Update</span>
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Tractors Management & Photo Upload Tab */}
-      {activeTab === 'tractors' && (
-        <div className="space-y-4">
-          <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-xs text-emerald-900 flex items-center gap-2">
-            <Upload className="w-4 h-4 text-[#2E7D32] shrink-0" />
-            <span>
-              <strong>Upload Tractor Photo:</strong> Uploaded images are compressed to 800px width in the browser, saved in Firestore, and always take priority over automatic Wikimedia Commons search.
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {tractors.map((tr) => (
-              <div key={tr.id} className="bg-white rounded-3xl p-5 border border-gray-200 shadow-md space-y-3 flex flex-col justify-between">
-                <div>
-                  <div className="rounded-2xl overflow-hidden bg-gray-100 mb-3 border border-gray-100">
-                    <TractorImage tractor={tr} frameClassName="w-full aspect-[4/3]" />
-                  </div>
-                  <h4 className="font-bold text-base text-gray-900">{tr.name}</h4>
-                  <p className="text-xs text-gray-500">{tr.horsepower} HP • {tr.cylinders} Cylinders</p>
-                </div>
-
-                <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
-                  <span className="font-black text-[#1B5E20] text-base">{formatPKR(tr.pricePKR)}</span>
-                  
-                  <button
-                    onClick={() => {
-                      setSelectedTractorForUpload(tr.id);
-                      tractorFileInputRef.current?.click();
-                    }}
-                    disabled={uploadingId === tr.id}
-                    className="px-3 py-1.5 bg-[#1B5E20] hover:bg-[#2E7D32] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
-                  >
-                    {uploadingId === tr.id ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5 text-[#F9A825]" />
-                    )}
-                    <span>{uploadingId === tr.id ? 'Compressing...' : 'Upload photo'}</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Crops Management & Photo Upload Tab */}
-      {activeTab === 'crops' && (
-        <div className="space-y-4">
-          <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 text-xs text-emerald-900 flex items-center gap-2">
-            <BookOpen className="w-4 h-4 text-[#2E7D32] shrink-0" />
-            <span>
-              <strong>Upload Crop Photo:</strong> Set the exact verified photo for any crop guide. Compressed to 800px width in the browser, stored in Firestore, and takes priority everywhere (cards, details, search, calendar).
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {CROPS_DATA.map((crop) => (
-              <div key={crop.id} className="bg-white rounded-3xl p-5 border border-gray-200 shadow-md space-y-3 flex flex-col justify-between">
-                <div>
-                  <div className="rounded-2xl overflow-hidden bg-gray-100 mb-3 border border-gray-100">
-                    <CropImage crop={crop} frameClassName="w-full aspect-[16/10]" />
-                  </div>
-                  <h4 className="font-bold text-base text-gray-900">{crop.nameEn}</h4>
-                  <p className="text-xs text-gray-500">{crop.nameUr} • {crop.season} ({crop.category})</p>
-                </div>
-
-                <div className="pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-bold text-gray-400 uppercase">{crop.id}</span>
-                  
-                  <button
-                    onClick={() => {
-                      setSelectedCropForUpload(crop.id);
-                      cropFileInputRef.current?.click();
-                    }}
-                    disabled={uploadingId === crop.id}
-                    className="px-3 py-1.5 bg-[#1B5E20] hover:bg-[#2E7D32] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
-                  >
-                    {uploadingId === crop.id ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Upload className="w-3.5 h-3.5 text-[#F9A825]" />
-                    )}
-                    <span>{uploadingId === crop.id ? 'Compressing...' : 'Upload crop photo'}</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Reported Listings Tab */}
+      {/* ========================================================= */}
+      {/* TAB 1: REPORTED ITEMS                                    */}
+      {/* ========================================================= */}
       {activeTab === 'reports' && (
-        <div className="space-y-4">
-          {reports.map((rep) => (
-            <div
-              key={rep.id}
-              className="bg-white rounded-3xl p-5 border border-red-100 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-            >
-              <div>
-                <span className="text-xs font-bold uppercase text-red-600 bg-red-50 px-2.5 py-0.5 rounded-md">
-                  {rep.reason}
-                </span>
-                <h4 className="font-bold text-sm text-gray-900 mt-1">Listing: {rep.listingTitle}</h4>
-                <p className="text-xs text-gray-500 mt-0.5">{rep.details || 'No additional comment provided.'}</p>
-                <span className="text-[10px] text-gray-400 mt-1 block">
-                  Reported by {rep.reportedBy} on {new Date(rep.timestamp).toLocaleDateString()}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleReportAction(rep.id, 'dismissed')}
-                  className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl cursor-pointer"
-                >
-                  Dismiss
-                </button>
-                <button
-                  onClick={() => handleReportAction(rep.id, 'reviewed')}
-                  className="px-3 py-1.5 bg-[#2E7D32] hover:bg-[#1B5E20] text-white text-xs font-bold rounded-xl cursor-pointer"
-                >
-                  Mark Reviewed
-                </button>
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#FFFBEF] p-4 rounded-2xl border border-[#E3D3A8]">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-gray-700 uppercase">{isUrdu ? 'فلٹر حیثیت:' : 'Status Filter:'}</span>
+              <div className="flex items-center gap-1.5">
+                {(['pending', 'reviewed', 'dismissed', 'all'] as const).map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setReportFilter(st)}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold uppercase transition-colors cursor-pointer ${
+                      reportFilter === st
+                        ? 'bg-[#1B6B2A] text-white'
+                        : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
               </div>
             </div>
-          ))}
-
-          {reports.length === 0 && (
-            <div className="p-8 text-center bg-white rounded-3xl border border-gray-200 text-xs text-gray-500">
-              No pending reports. Marketplace is healthy and clean.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Reported Wholesaler Reviews Tab */}
-      {activeTab === 'reportedReviews' && (
-        <div className="space-y-4">
-          
-          {/* Policy Guidance Note */}
-          <div className="p-4 bg-[#FFF3D6] rounded-2xl border border-[#E3D3A8] text-xs text-[#0B3A17] flex items-center gap-2.5">
-            <ShieldCheck className="w-5 h-5 text-[#1B6B2A] shrink-0" />
-            <div>
-              <p className="font-bold">
-                {lang === 'ur'
-                  ? 'براہ کرم دیانت داری اور احترام سے تبصرہ کریں۔ جھوٹے یا نازیبا تبصرے فوراً ہٹا دیے جائیں گے۔'
-                  : 'Please write honest, respectful reviews. Abusive or false reviews will be removed.'}
-              </p>
-              <p className="text-[11px] text-gray-600 mt-0.5">
-                {lang === 'ur'
-                  ? 'ایڈمن پینل: مشکوک یا بلیک میلنگ پر مبنی تبصروں کا جائزہ لیں اور جعلی تبصرے حذف کریں۔'
-                  : 'Moderation Console: Review reported farmer feedback and delete malicious or fake reviews.'}
-              </p>
-            </div>
+            <p className="text-xs text-gray-500">
+              {isUrdu ? 'مشتبہ یا نامناسب اشتہارات و تبصرے' : 'Action user reports to protect mandi integrity'}
+            </p>
           </div>
 
-          {/* List of Reported Reviews */}
-          <div className="space-y-4">
-            {reportedReviews.map((rep) => (
-              <div
-                key={rep.id}
-                className="bg-white rounded-3xl p-5 sm:p-6 border border-red-200 shadow-md space-y-3"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <span className="text-xs font-bold uppercase text-red-700 bg-red-50 border border-red-200 px-2.5 py-0.5 rounded-md inline-block">
-                      {rep.reason}
-                    </span>
-                    <h4 className="font-bold text-sm sm:text-base text-gray-900 mt-1.5">
-                      Target Wholesaler: {rep.wholesalerName || rep.wholesalerUid}
-                    </h4>
-                    <p className="text-xs text-gray-500">
-                      Review written by: <strong>{rep.farmerName}</strong> • Reported by: <strong>{rep.reportedBy}</strong> on {new Date(rep.timestamp).toLocaleDateString()}
-                    </p>
-                  </div>
+          {/* Reported Listings */}
+          <div className="space-y-3">
+            <h3 className="text-base font-black text-[#0B3A17] flex items-center gap-2">
+              <ShoppingBag className="w-4 h-4 text-[#1B6B2A]" />
+              <span>{isUrdu ? 'رپورٹ شدہ منڈی اشتہارات' : 'Reported Listings'}</span>
+              <span className="text-xs font-normal text-gray-500">({filteredReportedListings.length})</span>
+            </h3>
 
-                  <span className={`px-2.5 py-0.5 text-xs font-bold rounded-full uppercase ${
-                    rep.status === 'pending'
-                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                      : 'bg-gray-100 text-gray-600'
-                  }`}>
-                    {rep.status}
-                  </span>
-                </div>
-
-                {/* The Reported Review Text */}
-                <div className="p-3.5 bg-gray-50 rounded-2xl border border-gray-200 text-xs sm:text-sm text-gray-800 font-medium italic">
-                  "{rep.reviewComment}"
-                </div>
-
-                {/* Reporter's detailed complaint */}
-                {rep.details && (
-                  <div className="text-xs text-red-900 bg-red-50/60 p-3 rounded-xl border border-red-100">
-                    <strong>Complaint details:</strong> {rep.details}
-                  </div>
-                )}
-
-                {/* Action Buttons: Dismiss, Delete Review, Mark Reviewed */}
-                <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-gray-100">
-                  <button
-                    onClick={() => handleReviewReportAction(rep.id, 'dismissed')}
-                    className="px-3.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl cursor-pointer"
-                  >
-                    Dismiss Report
-                  </button>
-
-                  <button
-                    onClick={() => handleReviewReportAction(rep.id, 'reviewed')}
-                    className="px-3.5 py-1.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-xs font-bold rounded-xl cursor-pointer"
-                  >
-                    Keep & Mark Reviewed
-                  </button>
-
-                  <button
-                    onClick={() => handleDeleteReportedReview(rep.reviewId, rep.id)}
-                    className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete Offending Review</span>
-                  </button>
-                </div>
-
+            {filteredReportedListings.length === 0 ? (
+              <div className="p-8 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] text-center text-xs text-gray-500">
+                {isUrdu ? 'کوئی رپورٹ موجود نہیں ہے۔' : 'No listing reports in this view.'}
               </div>
-            ))}
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredReportedListings.map((rep) => {
+                  const targetListing = listings.find((l) => l.id === rep.listingId);
+                  return (
+                    <div key={rep.id} className="p-4 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] shadow-sm space-y-3 flex flex-col justify-between">
+                      <div className="space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                            rep.status === 'pending' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-gray-100 text-gray-700'
+                          }`}>
+                            {rep.status}
+                          </span>
+                          <span className="text-[11px] text-gray-500">{timeAgo(rep.timestamp, isUrdu)}</span>
+                        </div>
+                        <h4 className="text-sm font-bold text-gray-900 leading-tight">
+                          {rep.listingTitle}
+                        </h4>
+                        <div className="text-xs bg-red-50 text-red-900 p-2.5 rounded-xl border border-red-200 space-y-1">
+                          <p className="font-bold">Reason: {rep.reason}</p>
+                          {rep.details && <p className="text-[11px] text-red-800">{rep.details}</p>}
+                        </div>
+                        {targetListing && (
+                          <div className="text-[11px] text-gray-600 bg-white p-2 rounded-xl border border-gray-200">
+                            Seller: <span className="font-bold">{targetListing.sellerName}</span> ({targetListing.sellerPhone}) | Rate: {formatPKR(targetListing.price)}
+                          </div>
+                        )}
+                      </div>
 
-            {reportedReviews.length === 0 && (
-              <div className="p-10 text-center bg-white rounded-3xl border border-gray-200 text-xs text-gray-500 space-y-1">
-                <Star className="w-8 h-8 text-gray-300 mx-auto" />
-                <p className="font-bold text-gray-800">No reported reviews.</p>
-                <p>All wholesaler ratings and farmer reviews are clear and verified.</p>
+                      {/* Actions */}
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E3D3A8]/60 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleClearReport(rep.id, 'listing', 'dismissed')}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer"
+                        >
+                          {isUrdu ? 'مسترد کریں' : 'Dismiss'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleClearReport(rep.id, 'listing', 'reviewed')}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-100 hover:bg-emerald-200 text-emerald-900 cursor-pointer"
+                        >
+                          {isUrdu ? 'حل شدہ مارک کریں' : 'Mark Reviewed'}
+                        </button>
+                        {targetListing && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleHideListing(targetListing.id, !!targetListing.hidden)}
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white cursor-pointer"
+                            >
+                              {targetListing.hidden ? (isUrdu ? 'ظاہر کریں' : 'Unhide') : (isUrdu ? 'چھپائیں' : 'Hide')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRemovalModalItem({ id: targetListing.id, title: targetListing.title, type: 'listing' })}
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white cursor-pointer"
+                            >
+                              {isUrdu ? 'وجہ کے ساتھ ہٹائیں' : 'Remove (Reason)'}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
 
+          {/* Reported Reviews */}
+          <div className="space-y-3 pt-4">
+            <h3 className="text-base font-black text-[#0B3A17] flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-[#1B6B2A]" />
+              <span>{isUrdu ? 'رپورٹ شدہ تاجر تبصرے' : 'Reported Reviews'}</span>
+              <span className="text-xs font-normal text-gray-500">({filteredReportedReviews.length})</span>
+            </h3>
+
+            {filteredReportedReviews.length === 0 ? (
+              <div className="p-8 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] text-center text-xs text-gray-500">
+                {isUrdu ? 'کوئی تبصرہ رپورٹ موجود نہیں ہے۔' : 'No review reports in this view.'}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {filteredReportedReviews.map((rep) => (
+                  <div key={rep.id} className="p-4 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] shadow-sm space-y-3 flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                          rep.status === 'pending' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-gray-100 text-gray-700'
+                        }`}>
+                          {rep.status}
+                        </span>
+                        <span className="text-[11px] text-gray-500">{timeAgo(rep.timestamp, isUrdu)}</span>
+                      </div>
+                      <p className="text-xs text-gray-600">
+                        Reviewer: <span className="font-bold text-gray-900">{rep.farmerName}</span> → Wholesaler: <span className="font-bold text-gray-900">{rep.wholesalerName || 'Dealer'}</span>
+                      </p>
+                      <div className="text-xs bg-white p-2.5 rounded-xl border border-gray-200 italic text-gray-800">
+                        "{rep.reviewComment}"
+                      </div>
+                      <div className="text-xs bg-red-50 text-red-900 p-2.5 rounded-xl border border-red-200">
+                        <p className="font-bold">Flagged for: {rep.reason}</p>
+                        {rep.details && <p className="text-[11px] text-red-800 mt-0.5">{rep.details}</p>}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E3D3A8]/60">
+                      <button
+                        type="button"
+                        onClick={() => handleClearReport(rep.id, 'review', 'dismissed')}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-gray-100 hover:bg-gray-200 text-gray-700 cursor-pointer"
+                      >
+                        {isUrdu ? 'مسترد کریں' : 'Dismiss'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleClearReport(rep.id, 'review', 'reviewed')}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-100 hover:bg-emerald-200 text-emerald-900 cursor-pointer"
+                      >
+                        {isUrdu ? 'حل شدہ مارک کریں' : 'Mark Reviewed'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteReview(rep.reviewId)}
+                        className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white cursor-pointer"
+                      >
+                        {isUrdu ? 'تبصرہ حذف کریں' : 'Delete Review'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* Add Fertilizer Price Modal */}
-      {showAddFert && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-gray-100 animate-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
-              <h3 className="font-black text-lg text-gray-900">{t.addFertilizerPrice}</h3>
-              <button onClick={() => setShowAddFert(false)}><X className="w-5 h-5" /></button>
+      {/* ========================================================= */}
+      {/* TAB 2: ALL LISTINGS                                      */}
+      {/* ========================================================= */}
+      {activeTab === 'listings' && (
+        <div className="space-y-4">
+          {/* Controls */}
+          <div className="flex flex-col sm:flex-row items-center gap-3 bg-[#FFFBEF] p-4 rounded-2xl border border-[#E3D3A8]">
+            <div className="relative flex-1 w-full">
+              <Search className="w-4 h-4 absolute start-3.5 top-3.5 text-gray-400" />
+              <input
+                type="text"
+                value={listingSearch}
+                onChange={(e) => setListingSearch(e.target.value)}
+                placeholder={isUrdu ? 'عنوان، بیچنے والے کا نام یا فون سے تلاش کریں...' : 'Search listings by title, seller or phone...'}
+                className="w-full ps-10 pe-4 py-2.5 bg-white border border-[#E3D3A8] rounded-xl text-sm"
+              />
             </div>
-            <form onSubmit={handleAddNewFert} className="mt-4 space-y-3 text-xs">
+
+            <div className="w-full sm:w-auto shrink-0">
+              <select
+                value={listingCategoryFilter}
+                onChange={(e) => setListingCategoryFilter(e.target.value)}
+                className="w-full sm:w-auto px-3.5 py-2.5 bg-white border border-[#E3D3A8] rounded-xl text-sm font-semibold"
+              >
+                <option value="All">{isUrdu ? 'تمام کیٹیگریز' : 'All Categories'}</option>
+                <option value="Crops/Produce">Crops/Produce</option>
+                <option value="Seeds">Seeds</option>
+                <option value="Fertilizers">Fertilizers</option>
+                <option value="Tractors">Tractors</option>
+                <option value="Farm Machinery">Farm Machinery</option>
+                <option value="Livestock">Livestock</option>
+                <option value="Buy Requests">Buy Requests</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Listings Table / Cards */}
+          <div className="bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-start text-xs sm:text-sm">
+                <thead className="bg-[#0B3A17] text-[#FFF8E1] text-[11px] uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4 text-start">Item</th>
+                    <th className="py-3 px-4 text-start">Category</th>
+                    <th className="py-3 px-4 text-start">Seller</th>
+                    <th className="py-3 px-4 text-start">Price</th>
+                    <th className="py-3 px-4 text-start">Status</th>
+                    <th className="py-3 px-4 text-end">Moderation Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E3D3A8]/60 text-gray-800">
+                  {filteredListings.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-gray-500">
+                        {isUrdu ? 'کوئی اشتہار نہیں ملا۔' : 'No listings found.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredListings.map((item) => (
+                      <tr key={item.id} className="hover:bg-[#FFF3D6]/50 transition-colors">
+                        <td className="py-3 px-4">
+                          <p className="font-bold text-gray-900 line-clamp-1">{item.title}</p>
+                          <span className="text-[10px] text-gray-500">{timeAgo(item.createdAt, isUrdu)}</span>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#E3D3A8]/40 text-[#0B3A17]">
+                            {item.category}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <p className="font-bold text-gray-900">{item.sellerName}</p>
+                          <p className="text-[10px] text-gray-500">{item.sellerPhone} ({item.sellerCity})</p>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap font-black text-[#1B6B2A]">
+                          {formatPKR(item.price)}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          {item.isRemovedByAdmin ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-900 border border-red-300">
+                              Removed: {item.adminRemovalReason || 'Admin Action'}
+                            </span>
+                          ) : item.hidden ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                              Hidden
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900">
+                              Active
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-end whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleHideListing(item.id, !!item.hidden)}
+                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                item.hidden
+                                  ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                              }`}
+                              title={item.hidden ? 'Unhide Listing' : 'Hide Listing'}
+                            >
+                              {item.hidden ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRemovalModalItem({ id: item.id, title: item.title, type: 'listing' })}
+                              className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold cursor-pointer"
+                              title="Mark as Removed by Admin"
+                            >
+                              {isUrdu ? 'ہٹائیں' : 'Remove'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteListing(item.id)}
+                              className="p-1.5 bg-red-100 text-red-700 hover:bg-red-200 rounded-lg cursor-pointer"
+                              title="Permanently Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 3: USERS                                              */}
+      {/* ========================================================= */}
+      {activeTab === 'users' && (
+        <div className="space-y-4">
+          <div className="bg-[#FFFBEF] p-4 rounded-2xl border border-[#E3D3A8]">
+            <div className="relative w-full">
+              <Search className="w-4 h-4 absolute start-3.5 top-3.5 text-gray-400" />
+              <input
+                type="text"
+                value={userSearch}
+                onChange={(e) => setUserSearch(e.target.value)}
+                placeholder={isUrdu ? 'صارف کا نام، ای میل، فون، شہر یا رول سے تلاش کریں...' : 'Search user by name, email, phone, city or role...'}
+                className="w-full ps-10 pe-4 py-2.5 bg-white border border-[#E3D3A8] rounded-xl text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-start text-xs sm:text-sm">
+                <thead className="bg-[#0B3A17] text-[#FFF8E1] text-[11px] uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4 text-start">User</th>
+                    <th className="py-3 px-4 text-start">Role</th>
+                    <th className="py-3 px-4 text-start">Location</th>
+                    <th className="py-3 px-4 text-start">Account Status</th>
+                    <th className="py-3 px-4 text-end">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E3D3A8]/60 text-gray-800">
+                  {filteredUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-gray-500">
+                        {isUrdu ? 'کوئی صارف نہیں ملا۔' : 'No users found.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredUsers.map((user) => (
+                      <tr key={user.uid} className="hover:bg-[#FFF3D6]/50 transition-colors">
+                        <td className="py-3 px-4">
+                          <p className="font-bold text-gray-900">{user.fullName}</p>
+                          <p className="text-[10px] text-gray-500">{user.email} | {user.phone}</p>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                            user.role === 'admin' 
+                              ? 'bg-purple-100 text-purple-900 border border-purple-300' 
+                              : user.role === 'wholesaler' 
+                                ? 'bg-amber-100 text-amber-900' 
+                                : 'bg-emerald-100 text-emerald-900'
+                          }`}>
+                            {user.role}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap text-gray-600">
+                          {user.city}, {user.province}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          {user.suspended ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-900 border border-red-300">
+                              Suspended {user.suspendedReason ? `(${user.suspendedReason})` : ''}
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900">
+                              Active
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-end whitespace-nowrap">
+                          {user.role !== 'admin' && (
+                            user.suspended ? (
+                              <button
+                                type="button"
+                                onClick={() => handleUnsuspendUser(user.uid)}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ms-auto cursor-pointer"
+                              >
+                                <UserCheck className="w-3.5 h-3.5" />
+                                <span>{isUrdu ? 'بحال کریں' : 'Unsuspend'}</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setSuspendModalUser(user)}
+                                className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ms-auto cursor-pointer"
+                              >
+                                <UserX className="w-3.5 h-3.5" />
+                                <span>{isUrdu ? 'معطل کریں' : 'Suspend User'}</span>
+                              </button>
+                            )
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 4: REVIEWS                                            */}
+      {/* ========================================================= */}
+      {activeTab === 'reviews' && (
+        <div className="space-y-4">
+          <div className="bg-[#FFFBEF] p-4 rounded-2xl border border-[#E3D3A8]">
+            <div className="relative w-full">
+              <Search className="w-4 h-4 absolute start-3.5 top-3.5 text-gray-400" />
+              <input
+                type="text"
+                value={reviewSearch}
+                onChange={(e) => setReviewSearch(e.target.value)}
+                placeholder={isUrdu ? 'تاجر، کسان یا تبصرے کے متن سے تلاش کریں...' : 'Search review by wholesaler, farmer or comment...'}
+                className="w-full ps-10 pe-4 py-2.5 bg-white border border-[#E3D3A8] rounded-xl text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredReviews.length === 0 ? (
+              <div className="col-span-2 p-8 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] text-center text-xs text-gray-500">
+                {isUrdu ? 'کوئی تبصرہ نہیں ملا۔' : 'No wholesaler reviews found.'}
+              </div>
+            ) : (
+              filteredReviews.map((rev) => (
+                <div key={rev.id} className="p-4 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] shadow-sm space-y-3 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-1 text-[#F2A900]">
+                        <Star className="w-4 h-4 fill-[#F2A900]" />
+                        <span className="font-black text-sm text-gray-900">{rev.ratings.overall.toFixed(1)}</span>
+                        <span className="text-[10px] text-gray-500">
+                          (Honesty: {rev.ratings.honesty} | Pay: {rev.ratings.paymentSpeed} | Beh: {rev.ratings.behavior})
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-gray-500">{timeAgo(rev.createdAt, isUrdu)}</span>
+                    </div>
+
+                    <p className="text-xs text-gray-600">
+                      Farmer: <span className="font-bold text-gray-900">{rev.farmerName}</span> → Wholesaler UID: <span className="font-mono text-[10px]">{rev.wholesalerUid.slice(0, 8)}...</span>
+                    </p>
+
+                    <p className="text-xs text-gray-800 bg-white p-2.5 rounded-xl border border-gray-200">
+                      "{rev.comment}"
+                    </p>
+
+                    {rev.hidden && (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        Hidden from Public
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E3D3A8]/60">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleHideReview(rev.id, !!rev.hidden)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white cursor-pointer"
+                    >
+                      {rev.hidden ? (isUrdu ? 'ظاہر کریں' : 'Unhide') : (isUrdu ? 'چھپائیں' : 'Hide')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteReview(rev.id)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white cursor-pointer"
+                    >
+                      {isUrdu ? 'حذف کریں' : 'Delete'}
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 5: TRANSPORT OFFERS                                   */}
+      {/* ========================================================= */}
+      {activeTab === 'transport' && (
+        <div className="space-y-4">
+          <div className="p-4 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] text-xs text-gray-700">
+            {isUrdu
+              ? 'ٹرانسپورٹ بورڈ، زرعی مشینری کرایہ اور فصل باربرداری کی لائیو پیشکشیں۔'
+              : 'Active transport board and agricultural machinery hauling offers.'}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {transportOffers.length === 0 ? (
+              <div className="col-span-3 p-8 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] text-center text-xs text-gray-500">
+                {isUrdu ? 'کوئی ٹرانسپورٹ آفر موجود نہیں ہے۔' : 'No transport offers found.'}
+              </div>
+            ) : (
+              transportOffers.map((item) => (
+                <div key={item.id} className="p-4 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] shadow-sm space-y-3 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#1B6B2A] text-white">
+                        {item.category}
+                      </span>
+                      <span className="text-[10px] text-gray-500">{timeAgo(item.createdAt, isUrdu)}</span>
+                    </div>
+
+                    <h4 className="font-bold text-sm text-gray-900">{item.title}</h4>
+                    <p className="text-xs text-gray-600">
+                      Route / City: <span className="font-bold text-gray-800">{item.sellerCity}, {item.sellerProvince}</span>
+                    </p>
+                    <p className="font-black text-sm text-[#1B6B2A]">{formatPKR(item.price)}</p>
+                    <p className="text-[11px] text-gray-500">Phone: {item.sellerPhone} ({item.sellerName})</p>
+
+                    {item.isRemovedByAdmin ? (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-900 border border-red-300">
+                        Removed: {item.adminRemovalReason || 'Admin Action'}
+                      </span>
+                    ) : item.hidden ? (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                        Hidden
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E3D3A8]/60">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleHideListing(item.id, !!item.hidden)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white cursor-pointer"
+                    >
+                      {item.hidden ? (isUrdu ? 'ظاہر کریں' : 'Unhide') : (isUrdu ? 'چھپائیں' : 'Hide')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRemovalModalItem({ id: item.id, title: item.title, type: 'transport' })}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white cursor-pointer"
+                    >
+                      {isUrdu ? 'ہٹائیں' : 'Remove'}
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 6: FERTILIZER AND TRACTOR PRICES                     */}
+      {/* ========================================================= */}
+      {activeTab === 'prices' && (
+        <div className="space-y-8">
+          {/* Fertilizer Rates */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-black text-[#0B3A17] flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-[#1B6B2A]" />
+              <span>{isUrdu ? 'سرکاری و مارکیٹ کھاد قیمتیں' : 'Fertilizer Rates Master Data'}</span>
+            </h3>
+
+            <div className="bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-start text-xs sm:text-sm">
+                  <thead className="bg-[#0B3A17] text-[#FFF8E1] text-[11px] uppercase tracking-wider">
+                    <tr>
+                      <th className="py-3 px-4 text-start">Product</th>
+                      <th className="py-3 px-4 text-start">Brand</th>
+                      <th className="py-3 px-4 text-start">Bag Weight</th>
+                      <th className="py-3 px-4 text-start">Current Price</th>
+                      <th className="py-3 px-4 text-start">Previous</th>
+                      <th className="py-3 px-4 text-start">Last Updated</th>
+                      <th className="py-3 px-4 text-end">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E3D3A8]/60 text-gray-800">
+                    {fertilizers.map((item) => (
+                      <tr key={item.id} className="hover:bg-[#FFF3D6]/50">
+                        <td className="py-3 px-4 font-bold text-gray-900">{item.name}</td>
+                        <td className="py-3 px-4">{item.brand}</td>
+                        <td className="py-3 px-4">{item.bagWeightKg} kg</td>
+                        <td className="py-3 px-4 font-black text-[#1B6B2A]">{formatPKR(item.currentPrice)}</td>
+                        <td className="py-3 px-4 text-gray-500">{formatPKR(item.previousPrice)}</td>
+                        <td className="py-3 px-4 text-gray-500">{formatDate(item.lastUpdated)}</td>
+                        <td className="py-3 px-4 text-end">
+                          <button
+                            type="button"
+                            onClick={() => setEditingFert(item)}
+                            className="px-3 py-1.5 bg-[#1B6B2A] hover:bg-[#0F3D1E] text-white rounded-lg text-xs font-bold cursor-pointer"
+                          >
+                            {isUrdu ? 'قیمت تبدیل کریں' : 'Edit Price'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Tractors Prices */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-black text-[#0B3A17] flex items-center gap-2">
+              <Truck className="w-5 h-5 text-[#1B6B2A]" />
+              <span>{isUrdu ? 'ٹریکٹر ماڈلز اور قیمتیں' : 'Tractor Models & Official Rates'}</span>
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {tractors.map((tr) => (
+                <div key={tr.id} className="p-4 bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] shadow-sm space-y-3 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="h-32 w-full rounded-xl overflow-hidden bg-gray-100">
+                      <img src={tr.image} alt={tr.name} className="w-full h-full object-cover" />
+                    </div>
+                    <h4 className="font-black text-sm text-gray-900">{tr.name} ({tr.brand})</h4>
+                    <p className="text-xs text-gray-600">{tr.horsepower} HP | Engine: {tr.engine}</p>
+                    <p className="font-black text-base text-[#1B6B2A]">{formatPKR(tr.pricePKR)}</p>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#E3D3A8]/60">
+                    <button
+                      type="button"
+                      onClick={() => setEditingTractor(tr)}
+                      className="px-3 py-1.5 bg-[#1B6B2A] hover:bg-[#0F3D1E] text-white rounded-lg text-xs font-bold cursor-pointer"
+                    >
+                      {isUrdu ? 'تفصیلات بدلیں' : 'Edit Specs & Price'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 7: ADMIN AUDIT LOGS                                   */}
+      {/* ========================================================= */}
+      {activeTab === 'logs' && (
+        <div className="space-y-4">
+          <div className="bg-[#FFFBEF] p-4 rounded-2xl border border-[#E3D3A8] flex items-center justify-between">
+            <div>
+              <h3 className="font-black text-base text-[#0B3A17]">{isUrdu ? 'ایڈمن آڈٹ لاگ ریکارڈز' : 'Administrative Audit Trail'}</h3>
+              <p className="text-xs text-gray-600">{isUrdu ? 'ہر ایڈمن ایکشن کا مستقل دستاویزی ثبوت' : 'Permanent immutable record of moderation events'}</p>
+            </div>
+            <span className="text-xs font-mono font-bold bg-[#E3D3A8]/40 px-3 py-1 rounded-full text-gray-800">
+              {logs.length} logged events
+            </span>
+          </div>
+
+          <div className="bg-[#FFFBEF] rounded-2xl border border-[#E3D3A8] overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-start text-xs">
+                <thead className="bg-[#0B3A17] text-[#FFF8E1] text-[10px] uppercase tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-3 text-start">Timestamp</th>
+                    <th className="py-2.5 px-3 text-start">Admin</th>
+                    <th className="py-2.5 px-3 text-start">Action</th>
+                    <th className="py-2.5 px-3 text-start">Target</th>
+                    <th className="py-2.5 px-3 text-start">Reason / Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E3D3A8]/60 text-gray-800">
+                  {logs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-6 text-center text-gray-500">
+                        {isUrdu ? 'ابھی کوئی لاگ موجود نہیں ہے۔' : 'No audit records logged yet.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    logs.map((lg) => (
+                      <tr key={lg.id} className="hover:bg-[#FFF3D6]/50">
+                        <td className="py-2 px-3 whitespace-nowrap text-gray-500 font-mono text-[11px]">
+                          {formatDate(lg.timestamp)}
+                        </td>
+                        <td className="py-2 px-3 whitespace-nowrap font-bold text-gray-900">
+                          {lg.adminName} ({lg.adminEmail})
+                        </td>
+                        <td className="py-2 px-3 whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-full font-mono text-[10px] font-bold bg-[#1B6B2A] text-white">
+                            {lg.action}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 whitespace-nowrap font-mono text-gray-600 text-[11px]">
+                          {lg.targetType}:{lg.targetId.slice(0, 10)}
+                        </td>
+                        <td className="py-2 px-3 text-gray-700">
+                          {lg.reason && <span className="font-bold text-red-800">[{lg.reason}] </span>}
+                          {lg.details}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* REMOVAL REASON MODAL                                      */}
+      {/* ========================================================= */}
+      {removalModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs">
+          <div className="bg-[#FFFBEF] rounded-3xl max-w-md w-full p-6 shadow-2xl border-2 border-red-600 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between pb-2 border-b border-[#E3D3A8]">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertTriangle className="w-5 h-5 shrink-0" />
+                <h3 className="font-black text-base">
+                  {isUrdu ? 'اشتہار ہٹانے کی وجہ درج کریں' : 'Specify Removal Reason'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRemovalModalItem(null)}
+                className="p-1 text-gray-400 hover:text-gray-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-700">
+              Listing: <span className="font-bold text-gray-900">{removalModalItem.title}</span>
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-gray-700 uppercase">
+                {isUrdu ? 'حذف کی وجہ (Reason):' : 'Official Reason:'}
+              </label>
+              <textarea
+                rows={3}
+                value={removalReason}
+                onChange={(e) => setRemovalReason(e.target.value)}
+                className="w-full p-3 bg-white border border-[#E3D3A8] rounded-xl text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-red-600"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setRemovalModalItem(null)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                {isUrdu ? 'منسوخ' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRemoval}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-xs shadow-md cursor-pointer"
+              >
+                {isUrdu ? 'اشتہار ہٹائیں اور لاگ کریں' : 'Confirm Removal & Log'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* SUSPEND USER MODAL                                        */}
+      {/* ========================================================= */}
+      {suspendModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs">
+          <div className="bg-[#FFFBEF] rounded-3xl max-w-md w-full p-6 shadow-2xl border-2 border-red-600 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between pb-2 border-b border-[#E3D3A8]">
+              <div className="flex items-center gap-2 text-red-700">
+                <UserX className="w-5 h-5 shrink-0" />
+                <h3 className="font-black text-base">
+                  {isUrdu ? 'صارف اکاؤنٹ معطل کریں' : 'Suspend User Account'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSuspendModalUser(null)}
+                className="p-1 text-gray-400 hover:text-gray-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="text-xs bg-red-50 text-red-950 p-3 rounded-xl border border-red-200 space-y-1">
+              <p className="font-bold">User: {suspendModalUser.fullName} ({suspendModalUser.email})</p>
+              <p className="text-[11px] text-red-800">
+                {isUrdu
+                  ? 'معطل شدہ صارف نیا اشتہار نہیں لگا سکتا، چیٹ نہیں کر سکتا اور نہ ہی ریٹنگ دے سکتا ہے۔'
+                  : 'Suspended users cannot post new listings, participate in chat, or submit reviews.'}
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-gray-700 uppercase">
+                {isUrdu ? 'معطلی کی وجہ (Reason):' : 'Suspension Reason:'}
+              </label>
+              <textarea
+                rows={3}
+                value={suspendReason}
+                onChange={(e) => setSuspendReason(e.target.value)}
+                className="w-full p-3 bg-white border border-[#E3D3A8] rounded-xl text-xs sm:text-sm text-gray-900 focus:ring-2 focus:ring-red-600"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSuspendModalUser(null)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                {isUrdu ? 'منسوخ' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSuspend}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-xs shadow-md cursor-pointer"
+              >
+                {isUrdu ? 'اکاؤنٹ معطل کریں' : 'Suspend & Record Log'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* EDIT FERTILIZER PRICE MODAL                               */}
+      {/* ========================================================= */}
+      {editingFert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs">
+          <div className="bg-[#FFFBEF] rounded-3xl max-w-md w-full p-6 shadow-2xl border-2 border-[#1B6B2A] space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between pb-2 border-b border-[#E3D3A8]">
+              <h3 className="font-black text-base text-[#0B3A17]">
+                {isUrdu ? 'کھاد کی قیمت میں تبدیلی' : 'Update Fertilizer Rate'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingFert(null)}
+                className="p-1 text-gray-400 hover:text-gray-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveFertilizerPrice} className="space-y-3.5 text-xs sm:text-sm">
               <div>
-                <label className="block font-bold text-gray-700 mb-1">Fertilizer Name (English)</label>
+                <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">Product Name</label>
                 <input
                   type="text"
                   required
-                  value={newFert.name}
-                  onChange={(e) => setNewFert({ ...newFert, name: e.target.value })}
-                  placeholder="e.g. Sona Urea (Granular)"
-                  className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl font-bold"
+                  value={editingFert.name}
+                  onChange={(e) => setEditingFert({ ...editingFert, name: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-[#E3D3A8] rounded-xl font-bold"
                 />
               </div>
-              <div>
-                <label className="block font-bold text-gray-700 mb-1">نام (اردو)</label>
-                <input
-                  type="text"
-                  value={newFert.nameUrdu}
-                  onChange={(e) => setNewFert({ ...newFert, nameUrdu: e.target.value })}
-                  placeholder="مثلاً سونا یوریا"
-                  className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl font-bold"
-                />
-              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold text-gray-700 mb-1">Company / Brand</label>
-                  <select
-                    value={newFert.brand}
-                    onChange={(e) => setNewFert({ ...newFert, brand: e.target.value })}
-                    className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl font-semibold"
-                  >
-                    <option value="FFC (Fauji Fertilizer)">FFC</option>
-                    <option value="Engro Fertilizers">Engro</option>
-                    <option value="Fatima Fertilizer">Fatima</option>
-                    <option value="FFBL">FFBL</option>
-                    <option value="Agritech (Tara)">Agritech</option>
-                  </select>
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">Current Price (PKR)</label>
+                  <input
+                    type="number"
+                    required
+                    value={editingFert.currentPrice}
+                    onChange={(e) => setEditingFert({ ...editingFert, currentPrice: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-white border border-[#E3D3A8] rounded-xl font-bold text-[#1B6B2A]"
+                  />
                 </div>
                 <div>
-                  <label className="block font-bold text-gray-700 mb-1">Type</label>
-                  <select
-                    value={newFert.type}
-                    onChange={(e) => setNewFert({ ...newFert, type: e.target.value as any })}
-                    className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl font-semibold"
-                  >
-                    <option value="Urea">Urea</option>
-                    <option value="DAP">DAP</option>
-                    <option value="CAN">CAN</option>
-                    <option value="NP">NP</option>
-                    <option value="Nitrophos">Nitrophos</option>
-                    <option value="Potash">Potash</option>
-                    <option value="SSP">SSP</option>
-                  </select>
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">Previous Price (PKR)</label>
+                  <input
+                    type="number"
+                    value={editingFert.previousPrice}
+                    onChange={(e) => setEditingFert({ ...editingFert, previousPrice: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-white border border-[#E3D3A8] rounded-xl font-semibold"
+                  />
                 </div>
               </div>
+
               <div>
-                <label className="block font-bold text-gray-700 mb-1">Current Price per 50 kg Bag (PKR)</label>
+                <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">Market Notes / Subsidy info</label>
                 <input
-                  type="number"
-                  required
-                  value={newFert.currentPrice}
-                  onChange={(e) => setNewFert({ ...newFert, currentPrice: Number(e.target.value) })}
-                  className="w-full p-2.5 bg-gray-50 border border-gray-300 rounded-xl font-bold text-[#1B5E20] text-base"
+                  type="text"
+                  value={editingFert.notes || ''}
+                  onChange={(e) => setEditingFert({ ...editingFert, notes: e.target.value })}
+                  placeholder="e.g. Subsidy included, Punjab official rate"
+                  className="w-full px-3 py-2 bg-white border border-[#E3D3A8] rounded-xl"
                 />
               </div>
-              <div className="pt-3 flex justify-end gap-2">
+
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddFert(false)}
-                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl font-bold cursor-pointer"
+                  onClick={() => setEditingFert(null)}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-[#1B5E20] hover:bg-[#2E7D32] text-white rounded-xl font-bold shadow-md cursor-pointer"
+                  className="px-5 py-2 bg-[#1B6B2A] hover:bg-[#0F3D1E] text-white font-black rounded-xl text-xs shadow-md cursor-pointer"
                 >
-                  Publish Price
+                  Save & Publish Rate
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* EDIT TRACTOR MODAL                                        */}
+      {/* ========================================================= */}
+      {editingTractor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs">
+          <div className="bg-[#FFFBEF] rounded-3xl max-w-md w-full p-6 shadow-2xl border-2 border-[#1B6B2A] space-y-4 animate-in zoom-in-95 duration-150 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-start justify-between pb-2 border-b border-[#E3D3A8]">
+              <h3 className="font-black text-base text-[#0B3A17]">
+                {isUrdu ? 'ٹریکٹر کی تفصیلات و قیمت' : 'Edit Tractor Details & Rate'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingTractor(null)}
+                className="p-1 text-gray-400 hover:text-gray-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveTractor} className="space-y-3.5 text-xs sm:text-sm">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">Model Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editingTractor.name}
+                  onChange={(e) => setEditingTractor({ ...editingTractor, name: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-[#E3D3A8] rounded-xl font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">Price (PKR)</label>
+                  <input
+                    type="number"
+                    required
+                    value={editingTractor.pricePKR}
+                    onChange={(e) => setEditingTractor({ ...editingTractor, pricePKR: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-white border border-[#E3D3A8] rounded-xl font-black text-[#1B6B2A]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">Horsepower (HP)</label>
+                  <input
+                    type="number"
+                    value={editingTractor.horsepower}
+                    onChange={(e) => setEditingTractor({ ...editingTractor, horsepower: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-white border border-[#E3D3A8] rounded-xl font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 uppercase mb-1">Photo URL</label>
+                <input
+                  type="text"
+                  value={editingTractor.image}
+                  onChange={(e) => setEditingTractor({ ...editingTractor, image: e.target.value })}
+                  className="w-full px-3 py-2 bg-white border border-[#E3D3A8] rounded-xl text-xs font-mono"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingTractor(null)}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-[#1B6B2A] hover:bg-[#0F3D1E] text-white font-black rounded-xl text-xs shadow-md cursor-pointer"
+                >
+                  Save Tractor
                 </button>
               </div>
             </form>

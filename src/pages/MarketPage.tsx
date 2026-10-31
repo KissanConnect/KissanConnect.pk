@@ -18,10 +18,19 @@ import {
   Flame,
   CheckCircle,
   Eye,
-  MessageSquare
+  EyeOff,
+  MessageSquare,
+  AlertTriangle,
+  Trash2,
+  ShieldAlert
 } from 'lucide-react';
 import { WholesalerRatingBadge } from '../components/WholesalerRatingBadge';
 import { WholesalerReviewModal } from '../components/WholesalerReviewModal';
+import { 
+  hideListingAdmin, 
+  removeListingByAdmin, 
+  deleteListingAdmin 
+} from '../services/adminService';
 
 const CATEGORIES: ('All' | ListingCategory)[] = [
   'All',
@@ -57,6 +66,11 @@ export const MarketPage: React.FC = () => {
     phone?: string;
   } | null>(null);
 
+  // Admin moderation quick actions
+  const [adminRemoveModal, setAdminRemoveModal] = useState<{ id: string; title: string } | null>(null);
+  const [adminRemoveReason, setAdminRemoveReason] = useState<string>('Prohibited item / Policy violation');
+  const [adminActionLoading, setAdminActionLoading] = useState<boolean>(false);
+
   useEffect(() => {
     const unsubscribe = subscribeToListings((data) => {
       setListings(data);
@@ -65,8 +79,61 @@ export const MarketPage: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  const handleAdminToggleHide = async (e: React.MouseEvent, listing: Listing) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!currentUser || currentUser.role !== 'admin') return;
+    try {
+      await hideListingAdmin(listing.id, !listing.hidden, currentUser);
+      setListings(prev => prev.map(l => l.id === listing.id ? { ...l, hidden: !l.hidden } : l));
+    } catch (err) {
+      console.error('Error toggling hide on listing:', err);
+    }
+  };
+
+  const handleAdminDelete = async (e: React.MouseEvent, listing: Listing) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!currentUser || currentUser.role !== 'admin') return;
+    const confirm = window.confirm(
+      lang === 'ur' 
+        ? `کیا آپ واقعی اس اشتہار کو حذف کرنا چاہتے ہیں؟\n"${listing.title}"`
+        : `Are you sure you want to permanently delete this listing?\n"${listing.title}"`
+    );
+    if (!confirm) return;
+
+    try {
+      await deleteListingAdmin(listing.id, currentUser);
+      setListings(prev => prev.filter(l => l.id !== listing.id));
+    } catch (err) {
+      console.error('Error deleting listing as admin:', err);
+    }
+  };
+
+  const handleAdminConfirmRemove = async () => {
+    if (!adminRemoveModal || !currentUser || currentUser.role !== 'admin') return;
+    setAdminActionLoading(true);
+    try {
+      await removeListingByAdmin(adminRemoveModal.id, adminRemoveReason, currentUser);
+      setListings(prev => prev.map(l => l.id === adminRemoveModal.id ? { 
+        ...l, 
+        isRemovedByAdmin: true, 
+        adminRemovalReason: adminRemoveReason 
+      } : l));
+      setAdminRemoveModal(null);
+    } catch (err) {
+      console.error('Error marking listing removed by admin:', err);
+    } finally {
+      setAdminActionLoading(false);
+    }
+  };
+
   const filteredListings = listings
     .filter((l) => {
+      // Non-admins never see hidden or admin-removed items
+      if (currentUser?.role !== 'admin' && (l.hidden || l.isRemovedByAdmin)) {
+        return false;
+      }
       if (selectedCategory !== 'All' && l.category !== selectedCategory) return false;
       if (selectedProvince !== 'All' && l.sellerProvince !== selectedProvince) return false;
       if (selectedCondition !== 'All' && l.condition !== selectedCondition) return false;
@@ -348,6 +415,18 @@ export const MarketPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Admin Status Strip */}
+                {currentUser?.role === 'admin' && (item.hidden || item.isRemovedByAdmin) && (
+                  <div className="bg-amber-600 text-white text-[11px] font-bold px-3 py-1 flex items-center justify-between gap-2">
+                    <span className="shrink-0">{item.hidden ? (lang === 'ur' ? 'پوشیدہ' : 'Hidden') : ''}</span>
+                    {item.isRemovedByAdmin && (
+                      <span className="truncate text-[10px]">
+                        {lang === 'ur' ? 'ایڈمن نے ہٹایا: ' : 'Admin Removed: '}{item.adminRemovalReason || 'Violation'}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {/* Footer Badges */}
                 <div className="p-4 pt-2 border-t border-gray-100 flex items-center justify-between text-[11px]">
                   <div className="flex items-center gap-1 text-gray-600 font-semibold truncate max-w-[150px]">
@@ -362,6 +441,57 @@ export const MarketPage: React.FC = () => {
                     </span>
                   )}
                 </div>
+
+                {/* Inline Admin Controls (Visible ONLY to Admin) */}
+                {currentUser?.role === 'admin' && (
+                  <div 
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    className="p-2.5 bg-amber-50/90 border-t border-amber-200/80 flex items-center justify-between gap-1.5 text-xs"
+                  >
+                    <span className="text-[10px] font-black uppercase text-amber-900 tracking-wider shrink-0">
+                      Admin:
+                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      <button
+                        type="button"
+                        onClick={(e) => handleAdminToggleHide(e, item)}
+                        className={`px-2 py-1 rounded-md text-[11px] font-bold transition-colors cursor-pointer flex items-center gap-1 ${
+                          item.hidden
+                            ? 'bg-amber-600 text-white hover:bg-amber-700'
+                            : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
+                        }`}
+                        title={item.hidden ? 'Unhide' : 'Hide from users'}
+                      >
+                        {item.hidden ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                        <span>{item.hidden ? (lang === 'ur' ? 'ظاہر کریں' : 'Unhide') : (lang === 'ur' ? 'چھپائیں' : 'Hide')}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setAdminRemoveModal({ id: item.id, title: item.title });
+                        }}
+                        className="px-2 py-1 rounded-md text-[11px] font-bold bg-orange-100 border border-orange-300 text-orange-900 hover:bg-orange-200 transition-colors cursor-pointer flex items-center gap-1"
+                        title="Mark as removed by admin with reason"
+                      >
+                        <AlertTriangle className="w-3 h-3 text-orange-700" />
+                        <span>{lang === 'ur' ? 'ہٹائیں' : 'Remove'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => handleAdminDelete(e, item)}
+                        className="px-2 py-1 rounded-md text-[11px] font-bold bg-red-100 border border-red-300 text-red-800 hover:bg-red-200 transition-colors cursor-pointer flex items-center gap-1"
+                        title="Delete permanently"
+                      >
+                        <Trash2 className="w-3 h-3 text-red-700" />
+                        <span>{lang === 'ur' ? 'حذف' : 'Delete'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </Link>
             );
           })}
@@ -399,6 +529,68 @@ export const MarketPage: React.FC = () => {
           isOpen={Boolean(selectedWholesalerForReview)}
           onClose={() => setSelectedWholesalerForReview(null)}
         />
+      )}
+
+      {/* Admin Remove with Reason Modal */}
+      {adminRemoveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-[#FFFBEF] rounded-3xl p-6 max-w-md w-full border-2 border-[#1B6B2A] shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-[#E3D3A8]">
+              <div className="flex items-center gap-2 text-red-700 font-black">
+                <AlertTriangle className="w-5 h-5 text-red-600" />
+                <span>{lang === 'ur' ? 'اشتہار ہٹائیں (ایڈمن)' : 'Remove Listing (Admin)'}</span>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setAdminRemoveModal(null)}
+                className="text-gray-500 hover:text-black p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-700">
+              {lang === 'ur' ? 'اشتہار کا عنوان:' : 'Listing Title:'}{' '}
+              <strong className="text-gray-900 font-bold">{adminRemoveModal.title}</strong>
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-[#0B3A17] block">
+                {lang === 'ur' ? 'ہٹانے کی وجہ درج کریں:' : 'Reason for removal:'}
+              </label>
+              <select
+                value={adminRemoveReason}
+                onChange={(e) => setAdminRemoveReason(e.target.value)}
+                className="w-full p-2.5 rounded-xl border border-[#E3D3A8] bg-white text-xs font-medium focus:ring-2 focus:ring-[#1B6B2A]"
+              >
+                <option value="Prohibited item / Policy violation">Prohibited item / Policy violation</option>
+                <option value="Inaccurate pricing / Fraudulent offer">Inaccurate pricing / Fraudulent offer</option>
+                <option value="Fake photos or misleading details">Fake photos or misleading details</option>
+                <option value="Duplicate or spam listing">Duplicate or spam listing</option>
+                <option value="User requested removal">User requested removal</option>
+                <option value="Violates community standards">Violates community standards</option>
+              </select>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setAdminRemoveModal(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-100"
+              >
+                {lang === 'ur' ? 'منسوخ' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={adminActionLoading}
+                onClick={handleAdminConfirmRemove}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white shadow-md disabled:opacity-50"
+              >
+                {adminActionLoading ? '...' : (lang === 'ur' ? 'تصدیق کریں' : 'Confirm Removal')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

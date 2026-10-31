@@ -47,7 +47,7 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <ScrollToTop />
-          <div className="min-h-screen flex flex-col bg-[#FFF8E7] text-[#1B1B1B] overflow-x-hidden">
+          <div className="min-h-[100dvh] w-full flex flex-col bg-[#FFF8E7] text-[#1B1B1B] overflow-x-hidden">
             {/* Small bilingual banner if database connection is down */}
             <DatabaseOfflineBanner />
 
@@ -58,7 +58,7 @@ export default function App() {
             <Navbar />
 
             {/* Main Page Content */}
-            <main className="flex-1 pb-16 xl:pb-0">
+            <main className="flex-1 pb-28 xl:pb-0 min-h-[100dvh] w-full max-w-full">
               <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/weather" element={<WeatherPage />} />
@@ -74,7 +74,7 @@ export default function App() {
                 <Route path="/create-listing" element={<CreateListingPage />} />
                 <Route path="/farmer-dashboard" element={<FarmerDashboardPage />} />
                 <Route path="/wholesaler-dashboard" element={<WholesalerDashboardPage />} />
-                <Route path="/admin" element={<AdminPage />} />
+                <Route path="/control-room-kc" element={<AdminPage />} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignUpPage />} />
                 <Route path="/suggestions" element={<SuggestionPage />} />

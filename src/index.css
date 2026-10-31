@@ -13,13 +13,46 @@
     --color-wheat: #F2A900;
   }
 
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
+    width: 100%;
+    max-width: 100vw;
     font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background-color: #FFF3D6;
     color: #1A1A1A;
     font-size: 16px;
     line-height: 1.6;
     overflow-x: hidden;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 0;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+    min-height: 100dvh;
+  }
+
+  /* Prevent iOS zoom on inputs while keeping 16px font */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+
+  img, video, canvas, svg {
+    max-width: 100%;
+    height: auto;
   }
 
   [dir="rtl"] {
@@ -31,6 +64,14 @@
   h1, h2, h3, h4, h5, h6 {
     color: #0B3A17;
   }
+}
+
+/* Wide tables must scroll smoothly on mobile */
+.table-responsive {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .font-urdu {

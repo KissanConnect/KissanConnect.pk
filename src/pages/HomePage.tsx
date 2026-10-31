@@ -135,7 +135,7 @@ export const HomePage: React.FC = () => {
               {currentUser ? (
                 <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 sm:gap-4 pt-2">
                   <Link
-                    to={currentUser.role === 'wholesaler' ? '/wholesaler-dashboard' : currentUser.role === 'admin' ? '/admin' : '/farmer-dashboard'}
+                    to={currentUser.role === 'wholesaler' ? '/wholesaler-dashboard' : '/farmer-dashboard'}
                     className="px-6 py-3.5 rounded-2xl bg-[#F2A900] hover:bg-[#d89600] text-[#1A1A1A] font-black text-sm sm:text-base shadow-xl hover:scale-105 transition-all flex items-center gap-2 cursor-pointer border border-[#E3D3A8]"
                   >
                     <LayoutDashboard className="w-5 h-5 text-[#1A1A1A]" />

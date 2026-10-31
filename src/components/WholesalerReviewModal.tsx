@@ -31,9 +31,13 @@ import {
   Lock,
   MessageCircle,
   HelpCircle,
-  Edit2
+  Edit2,
+  Eye,
+  EyeOff,
+  Trash2
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { hideReviewAdmin, deleteReviewAdmin } from '../services/adminService';
 
 interface WholesalerReviewModalProps {
   wholesalerUid: string;
@@ -116,10 +120,41 @@ export const WholesalerReviewModal: React.FC<WholesalerReviewModalProps> = ({
 
   if (!isOpen) return null;
 
+  const handleAdminToggleHideReview = async (review: WholesalerReview) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    try {
+      await hideReviewAdmin(review.id, !review.hidden, currentUser);
+      setReviews(prev => prev.map(r => r.id === review.id ? { ...r, hidden: !r.hidden } : r));
+    } catch (e) {
+      console.error('Error toggling hide on review:', e);
+    }
+  };
+
+  const handleAdminDeleteReview = async (review: WholesalerReview) => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    const confirm = window.confirm(
+      lang === 'ur'
+        ? 'کیا آپ واقعی اس تبصرے کو مستقل طور پر حذف کرنا چاہتے ہیں؟'
+        : 'Are you sure you want to permanently delete this review?'
+    );
+    if (!confirm) return;
+    try {
+      await deleteReviewAdmin(review.id, currentUser);
+      setReviews(prev => prev.filter(r => r.id !== review.id));
+    } catch (e) {
+      console.error('Error deleting review:', e);
+    }
+  };
+
   // Submit Review Handler
   const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
+
+    if (currentUser.suspended) {
+      setFormError(lang === 'ur' ? 'آپ کا اکاؤنٹ معطل ہے۔ آپ ریویو جمع نہیں کر سکتے۔' : 'Your account is suspended. You cannot submit reviews.');
+      return;
+    }
 
     if (currentUser.role === 'wholesaler') {
       setFormError(lang === 'ur' ? 'صرف کسان تاجر کو ریٹنگ دے سکتے ہیں۔' : 'Only farmers can review wholesale buyers.');
@@ -215,6 +250,13 @@ export const WholesalerReviewModal: React.FC<WholesalerReviewModalProps> = ({
       setReportDetails('');
     }, 2000);
   };
+
+  const displayedReviews = reviews.filter((r) => {
+    if (currentUser?.role !== 'admin' && (r.hidden || r.isRemovedByAdmin)) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs text-start">
@@ -348,8 +390,16 @@ export const WholesalerReviewModal: React.FC<WholesalerReviewModalProps> = ({
 
         </div>
 
+        {/* If account suspended */}
+        {currentUser?.suspended && (
+          <div className="p-3.5 bg-red-100 rounded-2xl border border-red-300 text-xs text-red-900 font-bold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
+            <span>{lang === 'ur' ? 'آپ کا اکاؤنٹ معطل ہے۔ آپ ریویو نہیں لکھ سکتے۔' : 'Your account is suspended. You cannot submit reviews.'}</span>
+          </div>
+        )}
+
         {/* Action Button: Rate Wholesaler */}
-        {currentUser?.role === 'farmer' && (
+        {currentUser?.role === 'farmer' && !currentUser?.suspended && (
           <div className="flex justify-between items-center bg-[#E8F5E9] p-4 rounded-2xl border border-[#C8E6C9]">
             <div>
               <h4 className="font-bold text-xs sm:text-sm text-[#0B3A17]">
@@ -585,11 +635,11 @@ export const WholesalerReviewModal: React.FC<WholesalerReviewModalProps> = ({
           <div className="flex items-center justify-between">
             <h3 className="font-black text-sm sm:text-base text-[#0B3A17] flex items-center gap-1.5">
               <MessageSquare className="w-4 h-4 text-[#1B6B2A]" />
-              <span>{lang === 'ur' ? 'کسانوں کے تبصرے' : 'Farmer Reviews'} ({reviews.length})</span>
+              <span>{lang === 'ur' ? 'کسانوں کے تبصرے' : 'Farmer Reviews'} ({displayedReviews.length})</span>
             </h3>
           </div>
 
-          {reviews.length === 0 ? (
+          {displayedReviews.length === 0 ? (
             <div className="p-8 text-center bg-white rounded-3xl border border-[#E3D3A8] space-y-2">
               <Star className="w-8 h-8 text-gray-300 mx-auto" />
               <p className="text-sm font-bold text-gray-700">
@@ -601,7 +651,7 @@ export const WholesalerReviewModal: React.FC<WholesalerReviewModalProps> = ({
             </div>
           ) : (
             <div className="space-y-3">
-              {reviews.map((rev) => (
+              {displayedReviews.map((rev) => (
                 <div
                   key={rev.id}
                   className="p-5 bg-white rounded-3xl border border-[#E3D3A8] shadow-xs space-y-3"
@@ -722,6 +772,38 @@ export const WholesalerReviewModal: React.FC<WholesalerReviewModalProps> = ({
                           className="px-4 py-1 bg-[#1B5E20] text-white rounded-lg text-xs font-bold disabled:opacity-50"
                         >
                           {replySubmitting ? 'Posting...' : 'Post Reply'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Admin Moderation Controls (Admin only) */}
+                  {currentUser?.role === 'admin' && (
+                    <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between gap-2 bg-amber-50/70 p-2.5 rounded-2xl text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-amber-900 text-[10px] uppercase">Admin:</span>
+                        {rev.hidden && (
+                          <span className="bg-amber-600 text-white font-bold px-1.5 py-0.5 rounded-sm text-[10px]">
+                            Hidden (پوشیدہ)
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleAdminToggleHideReview(rev)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 cursor-pointer flex items-center gap-1"
+                        >
+                          {rev.hidden ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                          <span>{rev.hidden ? 'Unhide' : 'Hide'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAdminDeleteReview(rev)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-red-100 border border-red-300 text-red-800 hover:bg-red-200 cursor-pointer flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3 text-red-700" />
+                          <span>Delete</span>
                         </button>
                       </div>
                     </div>

@@ -12,6 +12,9 @@ export interface UserProfile {
   bio?: string;
   createdAt: string;
   photoURL?: string;
+  suspended?: boolean;
+  suspendedReason?: string;
+  suspendedAt?: string;
 }
 
 export interface FertilizerPrice {
@@ -134,6 +137,9 @@ export interface Listing {
   viewsCount: number;
   inquiriesCount: number;
   createdAt: string;
+  hidden?: boolean;
+  isRemovedByAdmin?: boolean;
+  adminRemovalReason?: string;
 }
 
 export interface ProduceRecord {
@@ -232,6 +238,7 @@ export interface WholesalerReview {
     repliedAt: string;
   };
   hidden?: boolean;
+  isRemovedByAdmin?: boolean;
 }
 
 export interface ReportedReview {
@@ -247,4 +254,17 @@ export interface ReportedReview {
   details?: string;
   timestamp: string;
   status: 'pending' | 'reviewed' | 'dismissed';
+}
+
+export interface AdminLog {
+  id: string;
+  adminUid: string;
+  adminName: string;
+  adminEmail: string;
+  action: string;
+  targetType: 'listing' | 'review' | 'user' | 'transport' | 'price' | 'report';
+  targetId: string;
+  details?: string;
+  reason?: string;
+  timestamp: string;
 }
